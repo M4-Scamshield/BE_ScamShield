@@ -17,13 +17,14 @@
 
 <fieldset>
   <legend>통화</legend>
-  callId <input id="callId" value="demo-1" size="12">
+  <button id="create">통화 만들기</button>
+  callId <input id="callId" size="38" readonly>
   <button id="connect">SSE 연결</button>
   <button id="state">상태 조회</button>
 </fieldset>
 
 <fieldset>
-  <legend>발화 넣기 (가짜 STT 대신 텍스트)</legend>
+  <legend>발화 넣기 (가짜 STT 대신 텍스트, DEV_ENDPOINTS=true 일 때만)</legend>
   <select id="track"><option>caller</option><option>callee</option></select>
   <input id="text" type="text" value="검찰청 수사관입니다. 고객님 통장이 범죄에 연루됐습니다">
   <button id="say">보내기</button>
@@ -49,13 +50,20 @@ const $ = id => document.getElementById(id);
 const log = (cls, msg) => { const d = document.createElement('div'); d.className = cls;
   d.textContent = new Date().toISOString().slice(11, 23) + '  ' + msg; $('log').prepend(d); };
 const callId = () => $('callId').value;
+let token = '';
+const auth = () => ({ Authorization: `Bearer ${token}` });
+
+$('create').onclick = () => fetch('/api/analysis/calls', { method: 'POST' }).then(r => r.json()).then(c => {
+  $('callId').value = c.callId; token = c.token;
+  log('sys', `통화 생성 ${c.callId} (토큰 ${c.expiresInSeconds / 3600}시간)`);
+});
 const seen = new Set();
 let es;
 
 $('connect').onclick = () => {
   if (es) es.close();
   seen.clear();
-  es = new EventSource(`/api/calls/${encodeURIComponent(callId())}/events`);
+  es = new EventSource(`/api/analysis/calls/${encodeURIComponent(callId())}/events?token=${token}`);
   es.onopen = () => log('sys', 'SSE 연결');
   es.onerror = () => log('sys', 'SSE 끊김 — 브라우저가 Last-Event-ID 로 재접속');
   for (const type of ['alert', 'action']) es.addEventListener(type, ev => {
@@ -65,16 +73,16 @@ $('connect').onclick = () => {
   });
 };
 
-const post = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+const post = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...auth() },
   body: JSON.stringify(body) }).then(r => r.ok ? r.json() : Promise.reject(r.status));
 
 $('say').onclick = () => post(`/api/dev/calls/${callId()}/utterances`, { trackId: $('track').value, text: $('text').value })
   .then(r => log('sys', `발화 발행 ${r.eventId}`), e => log('alert', '실패 ' + e));
-$('input').onclick = () => post(`/api/calls/${callId()}/inputs`, { inputType: $('itype').value, value: $('ivalue').value })
+$('input').onclick = () => post(`/api/analysis/calls/${callId()}/inputs`, { inputType: $('itype').value, value: $('ivalue').value })
   .then(r => log('sys', `입력 발행 ${r.eventId}`), e => log('alert', '실패 ' + e));
-$('state').onclick = () => fetch(`/api/calls/${callId()}`).then(r => r.json()).then(s => log('sys', JSON.stringify(s)));
+$('state').onclick = () => fetch(`/api/analysis/calls/${callId()}`, { headers: auth() }).then(r => r.json()).then(s => log('sys', JSON.stringify(s)));
 
-const wsUrl = track => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/audio?callId=${callId()}&trackId=${track}&epoch=0`;
+const wsUrl = track => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/audio?callId=${callId()}&token=${token}&trackId=${track}&epoch=0`;
 
 $('audio').onclick = () => {
   const ws = new WebSocket(wsUrl($('track').value));
