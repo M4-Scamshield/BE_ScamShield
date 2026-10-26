@@ -49,10 +49,32 @@ python3 sql/load.py run1 30 5          # 30통화 × 화자 2 × 5발화
 | `agent.mode` | `fake` | `http`면 `agent.url`로 POST |
 | `agent.fake.failure-rate` | 0.0 | 가짜 AI 실패 주입 |
 | `agent.context-size` | 6 | 요청에 붙는 앞 문맥 개수 |
-| `stt.mode` | `fake` | 리턴제로 구현은 업체·계정 확정 후 |
+| `stt.mode` | `fake` | `rtzr`면 리턴제로 스트리밍. `.env`의 `STT_MODE`로도 켠다 |
+| `stt.rtzr.keywords` | 사기 용어 7개 | 키워드 부스팅 (쉼표 구분, 한글·공백만) |
 
 예: `java -jar ... --scamshield.executor.workers=16 --scamshield.agent.fake.failure-rate=0.3`
 
+## 실제 STT (리턴제로)
+
+`backend/app/.env` 에 키를 넣는다 (커밋 안 됨, 채팅·코드에 붙이지 않는다).
+
+```
+RTZR_CLIENT_ID=...
+RTZR_CLIENT_SECRET=...
+STT_MODE=rtzr
+```
+
+음성 파일로 확인 (마이크 없이):
+
+```bash
+say -v Yuna -o /tmp/a.aiff "서울중앙지검입니다. [[slnc 1500]] 안전계좌로 이체하세요." \
+  && afconvert -f WAVE -d LEI16@16000 -c 1 /tmp/a.aiff /tmp/a.wav
+python3 -c "import wave;w=wave.open('/tmp/a.wav');open('/tmp/a.pcm','wb').write(w.readframes(w.getnframes()))"
+node tools/stream_pcm.mjs /tmp/a.pcm c1        # 실시간 속도로 /ws/audio 에 업로드
+```
+
+마이크로 확인: `http://localhost:8081/` 시험 페이지. 무료 계정은 동시 5채널(= 화자 5명).
+
 ## 아직 없는 것
 
-단위·통합 테스트(실험 18개 이식), 실제 STT(RtzrSttClient), 업로드 WS 인증, 분석 실패 알림, 다중 api 인스턴스 SSE 전달.
+단위·통합 테스트(실험 18개 이식), 업로드 WS·SSE 인증(통화별 토큰), SSE 연결 상한, 분석 실패 알림, 다중 api 인스턴스 SSE 전달.
