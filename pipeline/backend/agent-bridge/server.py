@@ -25,10 +25,15 @@ ACTION = {"OBSERVE": "OBSERVE", "SUSPECT": "ACQUIRE", "VERIFY": "VERIFY", "WARN"
 STATE_KEYS = ("transcript", "phase", "risk", "verification_results")
 
 
+def speaker(track_id: str | None) -> str:
+    """trackId → agent 가 읽는 화자 표기. 분석을 켠 브라우저의 마이크가 me(보호 대상), 나머지는 상대."""
+    return "나" if track_id == "me" else "상대"
+
+
 def turn_text(t: dict) -> str:
     if t.get("kind") == "INPUT":
         return f"[사용자 입력 {t.get('inputType')}] {t['text']}"
-    return f"{t.get('trackId')}: {t['text']}"
+    return f"[{speaker(t.get('trackId'))}] {t['text']}"
 
 
 class Bridge:
