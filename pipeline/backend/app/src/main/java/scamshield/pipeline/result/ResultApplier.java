@@ -7,6 +7,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -24,6 +25,7 @@ import scamshield.pipeline.analysis.Lease;
  *  3) 구간 기록 → analyzedTo = 빈틈없이 이어진 끝
  *  4) 경고: 이력 기준. 늦게 와도 올린다 (한 번 위험은 위험). 단계는 내려가지 않는다
  *  5) Agent 상태: state_version CAS. 성공했을 때만 newState 적용 + ACQUIRE/VERIFY 행동 발행
+ *     (직전 행동과 action·message 가 같으면 발행하지 않는다)
  */
 @Service
 public class ResultApplier {
@@ -99,7 +101,7 @@ public class ResultApplier {
         }
 
         boolean visible = AnalysisResponse.ACQUIRE.equals(res.action()) || AnalysisResponse.VERIFY.equals(res.action());
-        if (visible && stateApplied) {
+        if (visible && stateApplied && !sameAsLastAction(l.callId(), res)) {
             eventSeq++;
             db.update("insert into agent_action(call_id, event_seq, result_id, action, message) values (?,?,?,?,?)",
                     l.callId(), eventSeq, resultId, res.action(), res.message());
@@ -111,6 +113,14 @@ public class ResultApplier {
         db.update("""
                 update analysis_job set state = 'DONE', done_at = now(6), lease_until = null
                 where job_id = ?""", l.jobId());
+    }
+
+    /** Agent 가 같은 판단을 되풀이해도 화면에는 한 번만. 결과는 analysis_result 에 그대로 남는다. */
+    private boolean sameAsLastAction(String callId, AnalysisResponse res) {
+        List<Map<String, Object>> last = db.queryForList(
+                "select action, message from agent_action where call_id = ? order by event_seq desc limit 1", callId);
+        return !last.isEmpty() && res.action().equals(last.get(0).get("action"))
+                && Objects.equals(res.message(), last.get(0).get("message"));
     }
 
     static int levelOf(int score) {
