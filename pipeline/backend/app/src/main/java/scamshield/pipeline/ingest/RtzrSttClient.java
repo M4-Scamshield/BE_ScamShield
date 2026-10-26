@@ -26,12 +26,16 @@ import org.springframework.stereotype.Component;
  *   wss://openapi.vito.ai/v1/transcribe:streaming?sample_rate=16000&encoding=LINEAR16...
  * 음성은 바이너리 프레임, 끝은 텍스트 "EOS". 응답 중 final=true 만 넘긴다.
  * 키는 서버 환경변수(.env)에만 둔다. 무료 계정은 동시 5채널.
+ * RTZR 이 먼저 끊으면(무음 60초) 업로드 연결은 살려 두고 RTZR 쪽만 다시 붙는다.
  */
 @Component
 @ConditionalOnProperty(name = "scamshield.stt.mode", havingValue = "rtzr")
 public class RtzrSttClient implements SttClient {
 
     private static final Logger log = LoggerFactory.getLogger(RtzrSttClient.class);
+    private static final long BYTES_PER_MS = 32;      // 16kHz × 2바이트
+    private static final long MIN_ALIVE_MS = 5_000;   // 이보다 짧게 살다 끊기면 "바로 끊김"
+    private static final int MAX_QUICK_FAILURES = 3;
 
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     private final ObjectMapper json;
@@ -80,67 +84,120 @@ public class RtzrSttClient implements SttClient {
 
     @Override
     public SttSession open(String callId, String trackId, int streamEpoch, Listener listener) {
-        Receiver rx = new Receiver(trackId, streamEpoch, listener);
-        WebSocket ws;
+        Session s = new Session(callId, trackId, streamEpoch, listener);
         try {
+            s.connect();
+        } catch (Exception e) {
+            s.closed = true;
+            listener.onError(e);
+        }
+        return s;
+    }
+
+    /**
+     * 업로드 연결 하나에 붙은 RTZR 연결. RTZR 이 먼저 닫으면(무음 60초 등) 업로드는 그대로 두고
+     * 다음 음성이 올 때 RTZR 연결만 새로 연다. 연결이 곧바로 거듭 끊기면(한도 초과 등) 포기하고 onError.
+     */
+    private final class Session implements SttSession {
+        private final String callId;
+        private final String trackId;
+        private final int epoch;
+        private final Listener listener;
+        private WebSocket ws;
+        private Receiver rx;
+        private int gen;             // 같은 업로드 안에서 RTZR 에 다시 붙은 횟수
+        private long sentBytes;
+        private long connectedAt;
+        private int quickFailures;
+        boolean closed;
+
+        Session(String callId, String trackId, int epoch, Listener listener) {
+            this.callId = callId;
+            this.trackId = trackId;
+            this.epoch = epoch;
+            this.listener = listener;
+        }
+
+        /** RTZR 시각은 연결마다 0 부터라, 그동안 보낸 음성 길이를 더해 업로드 기준 시각으로 맞춘다. */
+        void connect() throws Exception {
+            Receiver next = new Receiver(trackId, epoch, gen, sentBytes / BYTES_PER_MS, listener);
             ws = http.newWebSocketBuilder()
                     .header("Authorization", "Bearer " + token())
                     .connectTimeout(Duration.ofSeconds(10))
-                    .buildAsync(URI.create("wss://" + baseUrl + "/v1/transcribe:streaming?" + query), rx)
+                    .buildAsync(URI.create("wss://" + baseUrl + "/v1/transcribe:streaming?" + query), next)
                     .get(10, TimeUnit.SECONDS);
-        } catch (Exception e) {
-            listener.onError(e);
-            return new SttSession() {
-                @Override public void sendAudio(byte[] pcm16) { }
-                @Override public void close() { }
-            };
+            rx = next;
+            connectedAt = System.currentTimeMillis();
+            log.info("RTZR 세션 열림 callId={} trackId={} gen={}", callId, trackId, gen);
         }
-        log.info("RTZR 세션 열림 callId={} trackId={}", callId, trackId);
 
-        return new SttSession() {
-            private boolean closed;
+        /** java.net.http.WebSocket 은 이전 전송이 끝나기 전에 다음을 보내면 예외 — 한 번에 하나씩. */
+        @Override
+        public synchronized void sendAudio(byte[] pcm16) {
+            if (closed) return;
+            if (rx.done.isDone() && !reconnect()) return;
+            ws.sendBinary(ByteBuffer.wrap(pcm16), true).join();
+            sentBytes += pcm16.length;
+        }
 
-            /** java.net.http.WebSocket 은 이전 전송이 끝나기 전에 다음을 보내면 예외 — 한 번에 하나씩. */
-            @Override
-            public synchronized void sendAudio(byte[] pcm16) {
-                if (closed || rx.done.isDone()) return;
-                ws.sendBinary(ByteBuffer.wrap(pcm16), true).join();
-            }
-
-            /** EOS 를 보내고 서버가 마지막 확정 결과를 보내고 닫을 때까지 잠깐 기다린다. */
-            @Override
-            public synchronized void close() {
-                if (closed) return;
+        /** 이번 조각은 버리고 다음 조각에서 다시 시도한다. 바로 끊기는 일이 이어지면 포기. */
+        private boolean reconnect() {
+            ws.abort();
+            if (System.currentTimeMillis() - connectedAt < MIN_ALIVE_MS) quickFailures++;
+            else quickFailures = 0;
+            if (quickFailures >= MAX_QUICK_FAILURES) {
                 closed = true;
-                try {
-                    if (!rx.done.isDone()) {
-                        rx.eosSent = true;
-                        ws.sendText("EOS", true).join();
-                        rx.done.get(eosWaitMs, TimeUnit.MILLISECONDS);
-                    }
-                } catch (Exception e) {
-                    log.warn("RTZR EOS 대기 중 종료 trackId={}: {}", trackId, e.toString());
-                } finally {
-                    ws.abort();
-                    log.info("RTZR 세션 닫힘 callId={} trackId={}", callId, trackId);
-                }
+                listener.onError(new IllegalStateException("RTZR 연결이 열리자마자 거듭 끊김 trackId=" + trackId));
+                return false;
             }
-        };
+            gen++;
+            try {
+                connect();
+                return true;
+            } catch (Exception e) {
+                log.warn("RTZR 재연결 실패 trackId={} gen={}: {}", trackId, gen, e.toString());
+                connectedAt = System.currentTimeMillis(); // 실패도 "바로 끊김" 으로 센다
+                return false;
+            }
+        }
+
+        /** EOS 를 보내고 서버가 마지막 확정 결과를 보내고 닫을 때까지 잠깐 기다린다. */
+        @Override
+        public synchronized void close() {
+            if (closed) return;
+            closed = true;
+            try {
+                if (!rx.done.isDone()) {
+                    rx.eosSent = true;
+                    ws.sendText("EOS", true).join();
+                    rx.done.get(eosWaitMs, TimeUnit.MILLISECONDS);
+                }
+            } catch (Exception e) {
+                log.warn("RTZR EOS 대기 중 종료 trackId={}: {}", trackId, e.toString());
+            } finally {
+                ws.abort();
+                log.info("RTZR 세션 닫힘 callId={} trackId={}", callId, trackId);
+            }
+        }
     }
 
     /** 수신 쪽. 텍스트 프레임이 쪼개져 올 수 있어 last 까지 모은다. */
     private final class Receiver implements WebSocket.Listener {
         private final String trackId;
         private final int epoch;
-        private final Listener listener;
+        private final int gen;
+        private final long offsetMs;
         private final StringBuilder buf = new StringBuilder();
         final CompletableFuture<Void> done = new CompletableFuture<>();
         volatile boolean eosSent;
+        private final Listener listener;
 
-        Receiver(String trackId, int epoch, Listener listener) {
+        Receiver(String trackId, int epoch, int gen, long offsetMs, Listener listener) {
             this.trackId = trackId;
-            this.epoch = epoch;
             this.listener = listener;
+            this.epoch = epoch;
+            this.gen = gen;
+            this.offsetMs = offsetMs;
         }
 
         @Override
@@ -165,25 +222,25 @@ public class RtzrSttClient implements SttClient {
             JsonNode alt = n.path("alternatives").path(0);
             String text = alt.path("text").asString("").strip();
             if (text.isEmpty()) return;
-            long start = n.path("start_at").asLong();
+            long start = offsetMs + n.path("start_at").asLong();
             Float conf = alt.has("confidence") ? (float) alt.get("confidence").asDouble() : null;
-            // segmentId: 같은 연결(epoch) 안에서 RTZR seq 가 유일하다
-            listener.onFinal(new Segment(trackId + "-e" + epoch + "-" + n.path("seq").asLong(),
+            // segmentId: RTZR seq 는 연결마다 0 부터라 (epoch, gen) 안에서만 유일하다
+            listener.onFinal(new Segment(trackId + "-e" + epoch + "r" + gen + "-" + n.path("seq").asLong(),
                     start, start + n.path("duration").asLong(), text, conf, Instant.now()));
         }
 
         @Override
         public CompletionStage<?> onClose(WebSocket ws, int statusCode, String reason) {
             done.complete(null);
-            // 우리가 EOS 를 안 보냈는데 닫혔다 = 무음 60초·한도 초과 등. 업로더가 epoch 올려 다시 붙는다
-            if (!eosSent) listener.onError(new IllegalStateException("RTZR 연결 종료 " + statusCode + " " + reason));
+            // 우리가 EOS 를 안 보냈는데 닫혔다 = 무음 60초·한도 초과 등. 다음 음성이 오면 Session 이 다시 붙는다
+            if (!eosSent) log.info("RTZR 가 먼저 닫음 trackId={} gen={} status={}", trackId, gen, statusCode);
             return null;
         }
 
         @Override
         public void onError(WebSocket ws, Throwable error) {
             done.complete(null);
-            listener.onError(error);
+            log.warn("RTZR 연결 오류 trackId={} gen={}: {}", trackId, gen, error.toString());
         }
     }
 }
