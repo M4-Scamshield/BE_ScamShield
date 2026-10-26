@@ -152,7 +152,7 @@ public class RtzrSttClient implements SttClient {
                 try {
                     handle(msg);
                 } catch (Exception e) {
-                    log.warn("RTZR 응답 처리 실패: {}", msg, e);
+                    log.warn("RTZR 응답 처리 실패 trackId={} len={}: {}", trackId, msg.length(), e.toString()); // 원문은 통화 내용이라 남기지 않는다
                 }
             }
             ws.request(1);
