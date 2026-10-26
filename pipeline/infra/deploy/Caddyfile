@@ -1,0 +1,9 @@
+# IP 단계: HTTP 만. 도메인을 붙이면 ":80" 을 "scamshield.example.com" 처럼 바꾸면 Caddy 가 인증서를 받는다.
+:80 {
+	encode gzip
+	# 운영 지표는 app 이 8082 로 따로 낸다(여기서 안 넘김). 아래는 겹쳐 막는 것
+	@internal path /actuator /actuator/* /actuator;*
+	respond @internal 404
+	# SSE·업로드 WS 는 reverse_proxy 가 그대로 흘려준다
+	reverse_proxy app:8081
+}

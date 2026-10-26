@@ -15,7 +15,8 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-AGENT_DIR = Path(os.environ.get("AGENT_DIR", Path(__file__).resolve().parents[2] / "team" / "scam-agent"))
+# 기본값은 env 가 없을 때만 계산한다 — 컨테이너(/bridge/server.py)에는 parents[2] 가 없다
+AGENT_DIR = Path(os.environ.get("AGENT_DIR") or Path(__file__).resolve().parents[2] / "team" / "scam-agent")
 sys.path.insert(0, str(AGENT_DIR))
 
 from scamshield.graph import CallDemo  # noqa: E402
