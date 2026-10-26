@@ -206,10 +206,17 @@ public class RtzrSttClient implements SttClient {
             if (last) {
                 String msg = buf.toString();
                 buf.setLength(0);
+                // JDK HttpClient 작업 스레드는 앱 클래스로더를 모른다. fat jar 에서 Kafka 가 설정 클래스를
+                // 이름으로 찾다 실패하므로(ProducerConfig 초기화 오류) 처리하는 동안만 앱 로더를 건다
+                Thread t = Thread.currentThread();
+                ClassLoader prev = t.getContextClassLoader();
+                t.setContextClassLoader(RtzrSttClient.class.getClassLoader());
                 try {
                     handle(msg);
                 } catch (Exception e) {
                     log.warn("RTZR 응답 처리 실패 trackId={} len={}: {}", trackId, msg.length(), e.toString()); // 원문은 통화 내용이라 남기지 않는다
+                } finally {
+                    t.setContextClassLoader(prev);
                 }
             }
             ws.request(1);
@@ -240,7 +247,7 @@ public class RtzrSttClient implements SttClient {
         @Override
         public void onError(WebSocket ws, Throwable error) {
             done.complete(null);
-            log.warn("RTZR 연결 오류 trackId={} gen={}: {}", trackId, gen, error.toString());
+            log.warn("RTZR 연결 오류 trackId={} gen={}", trackId, gen, error);
         }
     }
 }
