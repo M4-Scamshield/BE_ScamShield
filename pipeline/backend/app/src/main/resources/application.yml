@@ -1,5 +1,7 @@
 spring:
   application.name: scamshield-pipeline
+  # 비밀값은 backend/app/.env (커밋 안 함). 없으면 무시
+  config.import: optional:file:.env[.properties]
   threads.virtual.enabled: true
   datasource:
     # 시각은 전부 UTC 로 저장한다 (DATETIME 은 시간대를 안 들고 있다)
@@ -52,9 +54,18 @@ scamshield:
       jitter-ms: 400
       failure-rate: 0.0
   stt:
-    mode: fake                   # fake | rtzr
+    mode: ${STT_MODE:fake}       # fake | rtzr
     fake:
       bytes-per-utterance: 96000 # 16kHz·16bit·mono 3초 분량마다 대본 한 줄
+    rtzr:
+      base-url: openapi.vito.ai
+      client-id: ${RTZR_CLIENT_ID:}
+      client-secret: ${RTZR_CLIENT_SECRET:}
+      # domain=CALL 은 통화 음성용 모델
+      query: sample_rate=16000&encoding=LINEAR16&model_name=sommers_ko&domain=CALL&use_itn=true&use_disfluency_filter=false&use_profanity_filter=false
+      # 키워드 부스팅 (한글·공백만, 20자·100개 이하, "단어:점수" 가능). 10-26 TTS 시험: 없으면 범죄→범주, 안전계좌→완전 계좌
+      keywords: 범죄,안전계좌,검찰,수사관,이체,명의,연루
+      eos-wait-ms: 3000
   sse:
     heartbeat-seconds: 15
     relay-interval-ms: 100
