@@ -1,6 +1,5 @@
 package scamshield.pipeline.ingest;
 
-import java.net.URI;
 import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -15,7 +14,6 @@ import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.BinaryWebSocketHandler;
-import org.springframework.web.util.UriComponentsBuilder;
 import scamshield.pipeline.common.ApiRole;
 
 /**
@@ -35,10 +33,15 @@ public class AudioWebSocketHandler extends BinaryWebSocketHandler {
     private final SttClient stt;
     private final UtterancePublisher publisher;
     private final Map<String, SttClient.SttSession> sessions = new ConcurrentHashMap<>();
+    static final String CALL_ID = "callId", TRACK_ID = "trackId", EPOCH = "epoch", CLIENT_IP = "clientIp";
     private static final String SLOT = "sttSlot";
+    private static final String IP_SLOT = "ipSlot";
     private static final String LAST_AUDIO = "lastAudio";
     private final Semaphore slots;
     private final int maxTracksPerCall;
+    private final int maxPerIp;
+    /** IP → 지금 쓰는 STT 세션 수. 토큰을 여러 개 받아도 한 곳에서 전역 상한을 다 먹지 못하게 */
+    private final Map<String, Integer> perIp = new ConcurrentHashMap<>();
     private final long idleMs;
     /** callId → (trackId → 연결). 통화당 화자 수 세기와 같은 화자 재연결 처리용 */
     private final Map<String, Map<String, WebSocketSession>> tracks = new ConcurrentHashMap<>();
@@ -46,24 +49,23 @@ public class AudioWebSocketHandler extends BinaryWebSocketHandler {
     public AudioWebSocketHandler(SttClient stt, UtterancePublisher publisher,
                                  @Value("${scamshield.stt.max-sessions}") int maxSessions,
                                  @Value("${scamshield.stt.max-tracks-per-call}") int maxTracksPerCall,
+                                 @Value("${scamshield.stt.max-sessions-per-ip}") int maxPerIp,
                                  @Value("${scamshield.stt.idle-seconds}") long idleSeconds) {
         this.stt = stt;
         this.publisher = publisher;
         this.slots = new Semaphore(maxSessions);
         this.maxTracksPerCall = maxTracksPerCall;
+        this.maxPerIp = maxPerIp;
         this.idleMs = idleSeconds * 1000;
     }
 
     @Override
     public void afterConnectionEstablished(WebSocketSession ws) {
-        Map<String, String> q = query(ws.getUri());
-        String callId = q.get("callId");
-        String trackId = q.get("trackId");
-        int epoch = Integer.parseInt(q.getOrDefault("epoch", "0"));
-        if (callId == null || trackId == null) {
-            close(ws, CloseStatus.BAD_DATA.withReason("callId, trackId 필요"));
-            return;
-        }
+        // 토큰 확인을 통과한 값만 쓴다 (WebSocketConfig.TokenCheck 가 넣는다)
+        String callId = (String) ws.getAttributes().get(CALL_ID);
+        String trackId = (String) ws.getAttributes().get(TRACK_ID);
+        int epoch = (Integer) ws.getAttributes().get(EPOCH);
+        String ip = (String) ws.getAttributes().get(CLIENT_IP);
         WebSocketSession replaced = null;
         synchronized (tracks) {
             Map<String, WebSocketSession> byTrack = tracks.computeIfAbsent(callId, k -> new ConcurrentHashMap<>());
@@ -77,6 +79,12 @@ public class AudioWebSocketHandler extends BinaryWebSocketHandler {
         // 예전 연결이 닫히며 슬롯을 돌려준 뒤에 새 슬롯을 잡는다
         if (replaced != null) close(replaced, CloseStatus.NORMAL.withReason("replaced"));
         ws.getAttributes().put(LAST_AUDIO, new AtomicLong(System.currentTimeMillis()));
+        if (!acquireIp(ip)) {
+            log.warn("IP 당 STT 세션 상한 도달 callId={} trackId={}", callId, trackId);
+            close(ws, CloseStatus.POLICY_VIOLATION.withReason("too many sessions"));
+            return;
+        }
+        ws.getAttributes().put(IP_SLOT, ip);
         if (!slots.tryAcquire()) {
             log.warn("STT 세션 상한 도달 callId={} trackId={}", callId, trackId);
             close(ws, CloseStatus.SERVICE_OVERLOAD);
@@ -115,15 +123,15 @@ public class AudioWebSocketHandler extends BinaryWebSocketHandler {
             if (s != null) s.close();
         } finally {
             if (ws.getAttributes().remove(SLOT) != null) slots.release();
+            if (ws.getAttributes().remove(IP_SLOT) instanceof String ip) releaseIp(ip);
             untrack(ws);
         }
     }
 
     /** 이 연결이 아직 그 화자의 현재 연결일 때만 지운다 (재연결로 바뀌었으면 새 연결을 지우면 안 된다) */
     private void untrack(WebSocketSession ws) {
-        Map<String, String> q = query(ws.getUri());
-        String callId = q.get("callId");
-        String trackId = q.get("trackId");
+        String callId = (String) ws.getAttributes().get(CALL_ID);
+        String trackId = (String) ws.getAttributes().get(TRACK_ID);
         if (callId == null || trackId == null) return;
         synchronized (tracks) {
             Map<String, WebSocketSession> byTrack = tracks.get(callId);
@@ -139,14 +147,25 @@ public class AudioWebSocketHandler extends BinaryWebSocketHandler {
         tracks.values().forEach(byTrack -> byTrack.values().forEach(ws -> {
             Object last = ws.getAttributes().get(LAST_AUDIO);
             if (last instanceof AtomicLong t && now - t.get() > idleMs) {
-                log.info("음성이 {}초 안 와서 닫음 trackId={}", idleMs / 1000, query(ws.getUri()).get("trackId"));
+                log.info("음성이 {}초 안 와서 닫음 trackId={}", idleMs / 1000, ws.getAttributes().get(TRACK_ID));
                 close(ws, CloseStatus.SESSION_NOT_RELIABLE.withReason("idle"));
             }
         }));
     }
 
-    private static Map<String, String> query(URI uri) {
-        return UriComponentsBuilder.fromUri(uri).build().getQueryParams().toSingleValueMap();
+    private boolean acquireIp(String ip) {
+        boolean[] ok = {false};
+        perIp.compute(ip, (k, n) -> {
+            int cur = n == null ? 0 : n;
+            if (cur >= maxPerIp) return n;
+            ok[0] = true;
+            return cur + 1;
+        });
+        return ok[0];
+    }
+
+    private void releaseIp(String ip) {
+        perIp.computeIfPresent(ip, (k, n) -> n <= 1 ? null : n - 1);
     }
 
     private static void close(WebSocketSession ws, CloseStatus status) {

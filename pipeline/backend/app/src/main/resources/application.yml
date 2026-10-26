@@ -64,6 +64,7 @@ scamshield:
   stt:
     mode: ${STT_MODE:fake}       # fake | rtzr
     max-sessions: ${STT_MAX_SESSIONS:5}  # 동시 STT 세션(= 화자) 상한. 리턴제로 무료 계정은 동시 5채널
+    max-sessions-per-ip: ${STT_MAX_SESSIONS_PER_IP:4}  # IP 하나의 동시 STT 세션. 넘으면 1008
     max-tracks-per-call: 4       # 통화 하나(토큰 하나)가 열 수 있는 화자 수. 같은 trackId 재연결은 교체
     idle-seconds: 30             # 음성 프레임이 이만큼 안 오면 업로드 연결을 닫는다
     fake:

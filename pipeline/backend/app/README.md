@@ -58,6 +58,7 @@ python3 sql/load.py run1 30 5          # 30통화 × 화자 2 × 5발화 (DEV_EN
 | `stt.mode` | `fake` | `rtzr`면 리턴제로 스트리밍. `.env`의 `STT_MODE`로도 켠다 |
 | `stt.rtzr.keywords` | 사기 용어 7개 | 키워드 부스팅 (쉼표 구분, 한글·공백만) |
 | `stt.max-sessions` | 5 | 동시 STT 세션(화자) 상한. 넘으면 업로드 WS 를 1013 으로 닫는다 |
+| `stt.max-sessions-per-ip` | 4 | IP 하나의 동시 STT 세션(넘으면 1008). `STT_MAX_SESSIONS_PER_IP` |
 | `stt.max-tracks-per-call` / `idle-seconds` | 4 / 30 | 통화당 화자 수(넘으면 1008, 같은 trackId 는 교체) / 음성이 안 오면 닫는 시간 |
 | `access.create-per-minute` | 10 | IP 당 분당 통화 생성 수. 넘으면 429 |
 | `sse.max-per-call` / `max-total` / `timeout-minutes` | 3 / 500 / 30 | SSE 연결 상한·수명 |
