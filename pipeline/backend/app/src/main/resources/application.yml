@@ -38,6 +38,7 @@ scamshield:
     enabled: ${DEV_ENDPOINTS:false}  # true 면 토큰 없는 개발용 입구(/api/dev/**)를 연다. 배포에서는 끈다
   access:
     token-ttl-hours: 6           # 통화 토큰 유효 시간
+    create-per-minute: 10        # IP 하나가 1분에 만들 수 있는 통화 수. 넘으면 429
   web:
     # 업로드 WS 허용 Origin (쉼표 구분). 배포 때 우리 도메인으로 바꾼다
     allowed-origins: ${ALLOWED_ORIGINS:http://localhost:*,http://127.0.0.1:*}
@@ -63,6 +64,8 @@ scamshield:
   stt:
     mode: ${STT_MODE:fake}       # fake | rtzr
     max-sessions: ${STT_MAX_SESSIONS:5}  # 동시 STT 세션(= 화자) 상한. 리턴제로 무료 계정은 동시 5채널
+    max-tracks-per-call: 4       # 통화 하나(토큰 하나)가 열 수 있는 화자 수. 같은 trackId 재연결은 교체
+    idle-seconds: 30             # 음성 프레임이 이만큼 안 오면 업로드 연결을 닫는다
     fake:
       bytes-per-utterance: 96000 # 16kHz·16bit·mono 3초 분량마다 대본 한 줄
     rtzr:
