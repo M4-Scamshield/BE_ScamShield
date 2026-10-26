@@ -1,0 +1,40 @@
+# 빌드 산출물
+build/
+.gradle/
+out/
+*.class
+
+# IDE·OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# 도구 임시 파일
+.playwright-mcp/
+
+# 비밀값·로컬 설정 (.env 는 절대 커밋하지 않는다)
+.env
+*.env
+application-local.yml
+
+# 음성 데이터 (민감 개인정보 — 저장소에 넣지 않는다)
+*.wav
+*.pcm
+*.flac
+*.m4a
+
+# 개인 계획·작업 문서 (로컬에서만 유지, 레포에 넣지 않는다)
+docs/
+CLAUDE.md
+CONTINUITY.md
+findings.md
+progress.md
+task_plan.md
+backend/experiments/
+team/
+
+# 팀 레포 중복 clone (각자 레포가 따로 있다)
+FE_Scamshield/
+scam-agent/
+backend/README.md

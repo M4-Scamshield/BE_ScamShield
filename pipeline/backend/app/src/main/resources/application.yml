@@ -1,0 +1,60 @@
+spring:
+  application.name: scamshield-pipeline
+  threads.virtual.enabled: true
+  datasource:
+    # 시각은 전부 UTC 로 저장한다 (DATETIME 은 시간대를 안 들고 있다)
+    url: jdbc:mysql://localhost:53306/scamshield?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true
+    username: scamshield
+    password: ${DB_PASSWORD:localdev}
+    hikari:
+      # MySQL 기본(REPEATABLE READ)은 트랜잭션 첫 읽기 시점에 고정돼 다른 트랜잭션이 막 넣은 READY 를 못 본다.
+      # 실험 18개가 검증한 규칙은 READ COMMITTED 기준이다.
+      transaction-isolation: TRANSACTION_READ_COMMITTED
+  kafka:
+    bootstrap-servers: localhost:59092
+    producer:
+      acks: all
+      properties:
+        enable.idempotence: true
+    consumer:
+      group-id: scamshield-intake
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+    listener:
+      ack-mode: manual_immediate
+      concurrency: ${scamshield.kafka.partitions}   # 소비 스레드 = 파티션 수 (1이면 모든 통화가 한 줄로 밀린다)
+
+server:
+  port: 8081
+
+management:
+  endpoints.web.exposure.include: health,prometheus,metrics
+
+# 설정 손잡이 (명세 6절). 부하 실험 때 바꾸는 값은 전부 여기.
+scamshield:
+  roles: api,executor            # api = 업로드·SSE·입력 / executor = 작업 실행. 같은 jar, 프로필처럼 켠다
+  kafka:
+    topic: utterance
+    partitions: 6                # 동시 통화 목표(ALL1) 나오면 정한다
+  executor:
+    workers: 4
+    poll-interval-ms: 100
+    lease-seconds: 30            # AI 타임아웃(AI7) + 여유
+    max-attempts: 3
+    recover-interval-ms: 2000
+  agent:
+    mode: fake                   # fake | http
+    url: http://localhost:9000/analyze
+    timeout-ms: 20000
+    context-size: 6              # 문맥 N (AI4, 3/6/10 비교 예정)
+    fake:
+      delay-ms: 800
+      jitter-ms: 400
+      failure-rate: 0.0
+  stt:
+    mode: fake                   # fake | rtzr
+    fake:
+      bytes-per-utterance: 96000 # 16kHz·16bit·mono 3초 분량마다 대본 한 줄
+  sse:
+    heartbeat-seconds: 15
+    relay-interval-ms: 100
