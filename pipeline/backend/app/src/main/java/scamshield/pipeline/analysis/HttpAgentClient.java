@@ -5,6 +5,7 @@ import java.time.Duration;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.BufferingClientHttpRequestFactory;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -22,7 +23,8 @@ public class HttpAgentClient implements AgentClient {
         JdkClientHttpRequestFactory f = new JdkClientHttpRequestFactory(
                 HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build());
         f.setReadTimeout(Duration.ofMillis(timeoutMs));
-        this.rest = builder.baseUrl(url).requestFactory(f).build();
+        // 버퍼링 = Content-Length 를 붙여 보낸다. JDK 클라이언트 기본은 chunked 라 일부 서버(파이썬 http.server)가 본문을 못 읽는다
+        this.rest = builder.baseUrl(url).requestFactory(new BufferingClientHttpRequestFactory(f)).build();
     }
 
     @Override
