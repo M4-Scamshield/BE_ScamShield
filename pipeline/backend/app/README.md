@@ -37,6 +37,23 @@ curl -H "$A" localhost:8081/api/analysis/calls/$C                              #
 curl -N -H "$A" -H 'Last-Event-ID: 1' localhost:8081/api/analysis/calls/$C/events  # 2번부터 재생
 ```
 
+## 테스트
+
+```bash
+./gradlew test     # Docker 필요 — Testcontainers 가 MySQL 8.4 를 띄운다 (Kafka 는 안 씀)
+# colima 면:
+DOCKER_HOST=unix://$HOME/.colima/default/docker.sock TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock ./gradlew test
+```
+
+| 클래스 | 보는 것 |
+|---|---|
+| `CoverageTest` | 분석 중 들어온 발화가 빠지지 않는가, 구멍에서 analyzedTo 가 멈추는가, FAILED·SUPERSEDED 구간을 다음 작업이 덮는가 |
+| `CrashRecoveryTest` | 접수 커밋 전·후, 임대 뒤, AI 호출 뒤, 채택 뒤에 죽어도 수렴하는가. 좀비 토큰 거절, 재전송과 중복 생성 구분 |
+| `WindowTest` | 한 번에 보내는 구간이 언제 수렴하고 언제 발산하는가 |
+| `AgentStateTest` | 상태 CAS, 같은 안내 반복 억제, 경고·행동 eventSeq 순번 |
+
+실행기·릴레이는 끄고(`scamshield.roles=none`) 단계를 직접 부른다. lease 만료는 기다리지 않고 `lease_until` 을 과거로 돌린다.
+
 ## 부하·지연 분해
 
 ```bash
@@ -90,4 +107,4 @@ node tools/stream_pcm.mjs /tmp/a.pcm           # 통화 만들고 실시간 속�
 
 ## 아직 없는 것
 
-단위·통합 테스트(실험 18개 이식), 계정 단위 제한(지금 통화 생성 제한은 IP 기준, 인스턴스 메모리), 분석 실패 알림, 다중 api 인스턴스 SSE 전달.
+계정 단위 제한(지금 통화 생성 제한은 IP 기준, 인스턴스 메모리), 분석 실패 알림, 다중 api 인스턴스 SSE 전달.
