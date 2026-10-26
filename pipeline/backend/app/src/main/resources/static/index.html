@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>ScamShield 파이프라인 개발 페이지</title>
+<style>
+  body { font: 14px/1.5 -apple-system, sans-serif; max-width: 900px; margin: 24px auto; padding: 0 16px; }
+  fieldset { margin-bottom: 12px; }
+  input[type=text] { width: 60%; }
+  #log { background: #111; color: #ddd; padding: 12px; height: 360px; overflow: auto; font: 12px/1.4 monospace; }
+  .alert { color: #ff7b72; } .action { color: #79c0ff; } .sys { color: #8b949e; }
+</style>
+</head>
+<body>
+<h1>파이프라인 개발 페이지</h1>
+<p class="sys">개발용. 실제 앱 화면은 FE 담당. 이 페이지는 업로드 → 접수 → 분석 → SSE 경로 확인용이다.</p>
+
+<fieldset>
+  <legend>통화</legend>
+  callId <input id="callId" value="demo-1" size="12">
+  <button id="connect">SSE 연결</button>
+  <button id="state">상태 조회</button>
+</fieldset>
+
+<fieldset>
+  <legend>발화 넣기 (가짜 STT 대신 텍스트)</legend>
+  <select id="track"><option>caller</option><option>callee</option></select>
+  <input id="text" type="text" value="검찰청 수사관입니다. 고객님 통장이 범죄에 연루됐습니다">
+  <button id="say">보내기</button>
+</fieldset>
+
+<fieldset>
+  <legend>음성 업로드 (WebSocket → 가짜 STT, 무음 3초를 보내면 대본 한 줄)</legend>
+  <button id="audio">무음 3초 보내기</button>
+  <button id="mic">마이크 시작</button><button id="micStop" disabled>마이크 중지</button>
+</fieldset>
+
+<fieldset>
+  <legend>사용자 입력 (ACQUIRE 응답)</legend>
+  <select id="itype"><option>LINK</option><option>ACCOUNT</option><option>TEXT</option></select>
+  <input id="ivalue" type="text" value="http://example.invalid/app.apk">
+  <button id="input">보내기</button>
+</fieldset>
+
+<div id="log"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const log = (cls, msg) => { const d = document.createElement('div'); d.className = cls;
+  d.textContent = new Date().toISOString().slice(11, 23) + '  ' + msg; $('log').prepend(d); };
+const callId = () => $('callId').value;
+const seen = new Set();
+let es;
+
+$('connect').onclick = () => {
+  if (es) es.close();
+  seen.clear();
+  es = new EventSource(`/api/calls/${encodeURIComponent(callId())}/events`);
+  es.onopen = () => log('sys', 'SSE 연결');
+  es.onerror = () => log('sys', 'SSE 끊김 — 브라우저가 Last-Event-ID 로 재접속');
+  for (const type of ['alert', 'action']) es.addEventListener(type, ev => {
+    if (seen.has(ev.lastEventId)) return;  // 등록 후 재생이라 중복 가능 → id 로 거른다
+    seen.add(ev.lastEventId);
+    log(type, `#${ev.lastEventId} ${type} ${ev.data}`);
+  });
+};
+
+const post = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body) }).then(r => r.ok ? r.json() : Promise.reject(r.status));
+
+$('say').onclick = () => post(`/api/dev/calls/${callId()}/utterances`, { trackId: $('track').value, text: $('text').value })
+  .then(r => log('sys', `발화 발행 ${r.eventId}`), e => log('alert', '실패 ' + e));
+$('input').onclick = () => post(`/api/calls/${callId()}/inputs`, { inputType: $('itype').value, value: $('ivalue').value })
+  .then(r => log('sys', `입력 발행 ${r.eventId}`), e => log('alert', '실패 ' + e));
+$('state').onclick = () => fetch(`/api/calls/${callId()}`).then(r => r.json()).then(s => log('sys', JSON.stringify(s)));
+
+const wsUrl = track => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/audio?callId=${callId()}&trackId=${track}&epoch=0`;
+
+$('audio').onclick = () => {
+  const ws = new WebSocket(wsUrl($('track').value));
+  ws.binaryType = 'arraybuffer';
+  ws.onopen = () => { ws.send(new ArrayBuffer(96000)); ws.close(); log('sys', '무음 3초 전송'); };
+};
+
+// 마이크 → 16kHz PCM16 (1안 업로더의 최소형. 실제 업로더는 NET1 합의 후)
+let micCtx, micWs, micNode, micSrc;
+$('mic').onclick = async () => {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  micCtx = new AudioContext({ sampleRate: 16000 });
+  micWs = new WebSocket(wsUrl($('track').value));
+  micSrc = micCtx.createMediaStreamSource(stream);
+  micNode = micCtx.createScriptProcessor(4096, 1, 1);
+  micNode.onaudioprocess = e => {
+    if (micWs.readyState !== 1) return;
+    const f = e.inputBuffer.getChannelData(0), pcm = new Int16Array(f.length);
+    for (let i = 0; i < f.length; i++) pcm[i] = Math.max(-1, Math.min(1, f[i])) * 0x7fff;
+    micWs.send(pcm.buffer);
+  };
+  micSrc.connect(micNode); micNode.connect(micCtx.destination);
+  $('mic').disabled = true; $('micStop').disabled = false; log('sys', '마이크 시작');
+};
+$('micStop').onclick = () => {
+  micNode.disconnect(); micSrc.disconnect(); micCtx.close(); micWs.close();
+  $('mic').disabled = false; $('micStop').disabled = true; log('sys', '마이크 중지');
+};
+</script>
+</body>
+</html>
