@@ -76,7 +76,7 @@ scamshield:
       # domain=CALL 은 통화 음성용 모델
       query: sample_rate=16000&encoding=LINEAR16&model_name=sommers_ko&domain=CALL&use_itn=true&use_disfluency_filter=false&use_profanity_filter=false
       # 키워드 부스팅 (한글·공백만, 20자·100개 이하, "단어:점수" 가능). 10-26 TTS 시험: 없으면 범죄→범주, 안전계좌→완전 계좌
-      keywords: 범죄,안전계좌,검찰,수사관,이체,명의,연루
+      keywords: 범죄,안전계좌,검찰,수사관,이체,명의,연루,서울중앙지검
       eos-wait-ms: 3000
   sse:
     heartbeat-seconds: 15
