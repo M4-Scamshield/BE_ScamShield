@@ -1,0 +1,101 @@
+# ScamShield 운영 배포 (VM 한 대). 실행: infra/deploy 에서 docker compose up -d --build
+# - 바깥에 여는 건 caddy 하나뿐. mysql·kafka·bridge·app 은 ports: 가 없다 (내부망에서만 닿는다).
+# - 비밀값은 같은 폴더 .env (커밋 안 함, .env.example 참고). 서비스마다 필요한 값만 넘긴다.
+# - IP 단계는 :80(HTTP). 도메인을 붙이면 Caddyfile 주소만 바꿔 443 자동 인증서로 간다.
+name: scamshield-prod   # 로컬 개발 compose(scamshield)와 볼륨·컨테이너가 섞이지 않게
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: scamshield
+      MYSQL_USER: scamshield
+      MYSQL_PASSWORD: ${DB_PASSWORD:?}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?}
+      TZ: UTC
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci",
+              "--transaction-isolation=READ-COMMITTED"]
+    volumes:
+      - mysqldata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+
+  kafka:
+    image: apache/kafka:3.9.0
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      # 로컬 compose 와 달리 HOST 리스너가 없다. 같은 망의 app 만 쓴다
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_HEAP_OPTS: -Xmx512m -Xms512m
+    volumes:
+      - kafkadata:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+
+  bridge:
+    build:
+      context: ../../backend/agent-bridge
+      additional_contexts:
+        agent: ../../team/scam-agent
+    restart: unless-stopped
+    # Gemini 키는 여기만 받는다 (app 은 모른다)
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY:?}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.8-flash}   # 빈 문자열이면 agent 가 거부한다
+
+  app:
+    build: ../../backend/app
+    restart: unless-stopped
+    depends_on:
+      mysql: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      bridge: { condition: service_started }
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/scamshield?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true
+      DB_PASSWORD: ${DB_PASSWORD:?}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SCAMSHIELD_AGENT_MODE: http
+      SCAMSHIELD_AGENT_URL: http://bridge:9000/analyze
+      STT_MODE: ${STT_MODE:-rtzr}
+      RTZR_CLIENT_ID: ${RTZR_CLIENT_ID:-}
+      RTZR_CLIENT_SECRET: ${RTZR_CLIENT_SECRET:-}
+      DEV_ENDPOINTS: "false"
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?}
+      # caddy 가 붙인 X-Forwarded-For 로 진짜 IP 를 본다 (통화 생성·STT IP 상한). 사설망 프록시만 믿는다
+      SERVER_FORWARD_HEADERS_STRATEGY: native
+      # actuator 는 다른 포트로 뗀다. caddy 는 8081 만 넘기므로 경로 표기를 바꿔도 밖에서 못 닿는다
+      MANAGEMENT_SERVER_PORT: "8082"
+
+  caddy:
+    image: caddy:2.10
+    restart: unless-stopped
+    depends_on: [app]
+    ports:
+      - "80:80"
+      # 도메인 단계: - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+
+volumes:
+  mysqldata:
+  kafkadata:
+  caddydata:
