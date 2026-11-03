@@ -106,7 +106,7 @@ class CrashRecoveryTest extends PipelineTestSupport {
         assertEquals(zombie.jobId(), live.jobId());
         assertNotEquals(zombie.token(), live.token(), "시도마다 새 토큰이다");
 
-        apply(zombie, new AnalysisResponse(90, AnalysisResponse.WARN, "좀비", java.util.List.of(1L), null));
+        apply(zombie, new AnalysisResponse(90, AnalysisResponse.WARN, "좀비", null, java.util.List.of(1L), null));
         assertEquals(0, count("select count(*) from analysis_result"), "옛 토큰의 쓰기는 막혀야 한다");
 
         jobs.release(zombie, "좀비 반납");

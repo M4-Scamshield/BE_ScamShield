@@ -50,11 +50,12 @@ public class FakeAgentClient implements AgentClient {
         boolean input = r.turns().stream().anyMatch(t -> "INPUT".equals(t.kind()));
         String text = String.join(" ", r.turns().stream().map(AnalysisRequest.Turn::text).toList());
 
-        if (input) return new AnalysisResponse(60, AnalysisResponse.VERIFY, "입력하신 내용을 확인하고 있어요", all, state);
+        if (input) return new AnalysisResponse(60, AnalysisResponse.VERIFY, "입력하신 내용을 확인하고 있어요", null, all, state);
         if (MONEY.stream().anyMatch(text::contains))
-            return new AnalysisResponse(90, AnalysisResponse.WARN, "송금·계좌 요구가 나왔습니다. 통화를 끊으세요", all, state);
+            return new AnalysisResponse(90, AnalysisResponse.WARN, "송금·계좌 요구가 나왔습니다. 통화를 끊으세요",
+                    "(가짜) 송금·계좌 단어가 나왔다", all, state);
         if (LINK.stream().anyMatch(text::contains))
-            return new AnalysisResponse(50, AnalysisResponse.ACQUIRE, "받은 링크를 붙여넣어 주세요", all, state);
-        return new AnalysisResponse(10, AnalysisResponse.OBSERVE, null, List.of(), state);
+            return new AnalysisResponse(50, AnalysisResponse.ACQUIRE, "받은 링크를 붙여넣어 주세요", null, all, state);
+        return new AnalysisResponse(10, AnalysisResponse.OBSERVE, null, null, List.of(), state);
     }
 }
