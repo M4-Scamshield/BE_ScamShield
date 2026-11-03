@@ -56,10 +56,12 @@ services:
       additional_contexts:
         agent: ../../team/scam-agent
     restart: unless-stopped
-    # Gemini 키는 여기만 받는다 (app 은 모른다)
+    # JEV(TypeSafe)·Gemini 키는 여기만 받는다 (app 은 모른다)
     environment:
+      TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:?}
       GEMINI_API_KEY: ${GEMINI_API_KEY:?}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.8-flash}   # 빈 문자열이면 agent 가 거부한다
+      GEMINI_TIMEOUT_SECONDS: ${GEMINI_TIMEOUT_SECONDS:-20}   # JEV 30 + 이 값 < app 의 agent.timeout-ms
 
   app:
     build: ../../backend/app
