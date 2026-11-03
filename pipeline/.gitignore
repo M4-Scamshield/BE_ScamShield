@@ -38,3 +38,7 @@ team/
 FE_Scamshield/
 scam-agent/
 backend/README.md
+
+# 파이썬 캐시
+__pycache__/
+.pytest_cache/

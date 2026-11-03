@@ -1,0 +1,8 @@
+{
+  "score": 12,
+  "action": "OBSERVE",
+  "message": null,
+  "reason": null,
+  "evidenceSeqs": [],
+  "newState": {"transcript": ["[나] 저녁 뭐 먹을까"]}
+}
