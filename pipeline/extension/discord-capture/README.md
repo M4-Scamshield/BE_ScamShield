@@ -37,12 +37,13 @@ npm run receiver          # http://127.0.0.1:8081, 받은 음성을 dev/out/<cal
 ## 실제 분석 서버에 붙일 때
 
 - 팝업의 서버 주소를 분석 서버로 바꾼다 (예: `https://<서버>`; WS 는 자동으로 `wss://`)
-- **서버 `ALLOWED_ORIGINS` 에 확장 Origin 을 넣어야 한다.** 안 넣으면 WS 가 1006 으로 끊긴다.
-  확장 Origin 은 `chrome-extension://<확장 ID>` (`chrome://extensions` 에서 확인)
+- 확장 ID 는 manifest `key` 로 **`opdocepfbahoocfkahckhnbhdedkibim` 고정**이다(누가 어느 폴더에서 로드해도 같다).
+  서버 기본값(`application.yml`)에는 이미 `chrome-extension://opdocepfbahoocfkahckhnbhdedkibim` 이 들어 있다.
+- 배포에서 `ALLOWED_ORIGINS` 를 직접 줄 때는 뒤에 붙인다. 빠지면 WS 가 1006 으로 끊긴다.
   ```
-  ALLOWED_ORIGINS=http://localhost:*,http://127.0.0.1:*,chrome-extension://<확장 ID>
+  ALLOWED_ORIGINS=https://<우리 도메인>,chrome-extension://opdocepfbahoocfkahckhnbhdedkibim
   ```
-  압축해제 확장의 ID 는 폴더 경로마다 달라진다. 팀이 같은 ID 를 쓰려면 manifest 에 `key` 를 넣는다(아직 안 함)
+- `key` 는 공개키라 비밀이 아니다. 짝이 되는 개인키는 버렸다(압축해제 로드엔 필요 없음). 웹 스토어에 올리면 스토어가 ID 를 새로 준다
 
 ## 시험
 

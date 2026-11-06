@@ -22,6 +22,7 @@ import assert from "node:assert/strict";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const RECV_PORT = 18081, PAGE_PORT = 18090;
 const CAPTURE_MS = 6000;
+const EXTENSION_ID = "opdocepfbahoocfkahckhnbhdedkibim";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // 1. 확장 사본: 테스트 페이지 주소에도 content script 가 붙게 matches 만 늘린다
@@ -34,9 +35,12 @@ writeFileSync(join(ext, "manifest.json"), JSON.stringify(manifest, null, 2));
 const out = join(work, "out");
 
 // 2. 수신 서버 + 테스트 페이지 서버
-const recv = spawn(process.execPath, [join(ROOT, "dev/receiver.mjs"), "--port", String(RECV_PORT), "--out", out], { stdio: ["ignore", "pipe", "inherit"] });
+// SERVER=http://127.0.0.1:8095 npm test → 수신기 대신 실제 분석 서버로 보낸다 (WAV 검사는 건너뜀)
+const SERVER = process.env.SERVER;
+const recv = SERVER ? null : spawn(process.execPath, [join(ROOT, "dev/receiver.mjs"), "--port", String(RECV_PORT), "--out", out], { stdio: ["ignore", "pipe", "inherit"] });
 let recvLog = "";
-recv.stdout.on("data", (d) => (recvLog += d));
+recv?.stdout.on("data", (d) => (recvLog += d));
+let mid;
 const page = createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(readFileSync(join(ROOT, "test/fake-discord.html")));
 }).listen(PAGE_PORT, "127.0.0.1");
@@ -57,7 +61,9 @@ try {
     ],
   });
   const sw = context.serviceWorkers()[0] || (await context.waitForEvent("serviceworker"));
-  await sw.evaluate((s) => chrome.storage.local.set({ server: s }), `http://127.0.0.1:${RECV_PORT}`);
+  // manifest key 로 고정한 ID. 서버 ALLOWED_ORIGINS 기본값에 이 Origin 이 들어 있다
+  assert.equal(new URL(sw.url()).host, EXTENSION_ID, "확장 ID 가 고정값과 다르다 (manifest key 확인)");
+  await sw.evaluate((s) => chrome.storage.local.set({ server: s }), SERVER || `http://127.0.0.1:${RECV_PORT}`);
 
   const tab = await context.newPage();
   tab.on("console", (m) => m.type() === "error" && console.log("[page]", m.text()));
@@ -73,7 +79,7 @@ try {
   const started = await sw.evaluate((id) => self.ScamShield.startSession(id), tabId);
   console.log("시작:", started.session.callId);
   await sleep(CAPTURE_MS);
-  const mid = await sw.evaluate(() => self.ScamShield.view());
+  mid = await sw.evaluate(() => self.ScamShield.view());
   console.log("수집 중 상태:", JSON.stringify(mid.session.uploads), JSON.stringify(mid.tabs[0]?.status?.sources));
   assert.deepEqual(mid.session.errors, [], "수집 중 오류");
   await sw.evaluate(() => self.ScamShield.stopSession("test"));
@@ -81,7 +87,21 @@ try {
 } finally {
   await context?.close();
   page.close();
-  recv.kill();
+  recv?.kill();
+}
+
+if (SERVER) {
+  // 실제 서버: 세 트랙 모두 업로드가 열린 채 수집 시간만큼 보냈는지
+  const ups = mid.session.uploads;
+  console.table(ups.map(({ trackId, state, detail, seconds }) => ({ trackId, state, detail, seconds })));
+  assert.deepEqual(ups.map((u) => u.trackId).sort(), ["me", "peer-0", "peer-1"]);
+  for (const u of ups) {
+    assert.equal(u.state, "open", `${u.trackId} 업로드가 열려 있지 않다: ${u.detail}`);
+    assert.ok(u.seconds >= (CAPTURE_MS / 1000) * 0.8, `${u.trackId} ${u.seconds}s 만 보냈다`);
+  }
+  rmSync(work, { recursive: true, force: true });
+  console.log(`OK: ${SERVER} 가 확장 업로드(Origin chrome-extension://${EXTENSION_ID})를 받았다`);
+  process.exit(0);
 }
 
 // 5. 결과 확인
@@ -119,5 +139,6 @@ for (const f of peers) {
   assert.ok(results[f].seconds < (CAPTURE_MS / 1000) + 1.5, `${f} 길이 ${results[f].seconds.toFixed(2)}s 가 너무 길다`);
 }
 assert.ok(/\[close\][^\n]*peer/.test(recvLog), "끈 뒤 업로드 연결이 닫히지 않았다");
+assert.ok(recvLog.includes(`origin=chrome-extension://${EXTENSION_ID}`), "업로드 Origin 이 고정 ID 가 아니다");
 rmSync(work, { recursive: true, force: true });
 console.log("OK: 화자별 분리·주파수·길이·종료 확인");

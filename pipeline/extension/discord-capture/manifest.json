@@ -2,23 +2,44 @@
   "manifest_version": 3,
   "name": "ScamShield Discord 음성 수집",
   "version": "0.1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqylo+yQM194eaK2HO+CGoXmAUgw2GImLvsj+uw2UOX/Mqqgp3NUx5HBRc4GUXUJgcppSCefOaq++1K3JZ+euaHAVb1vWw2xFB6uGqHLTpCOtu9WC4F13vLaEEfH6Cb25awKGwSuJdt64C3kH1kU1k4KRtF3Wt12a/kNFt33sp1pPAotmQ8hCjiU4w50OYnzPdfRMEOfb3cTvYJGGWDzT1pLNAkyDtwSBpkNcafnJ/KKkZxh8Ir8U5Dnt8qchnzTxACLyiyxqSjZU0kHE7+JpXdkLZTqtP8My+yiIDEHa8WABtyGjvVogpOw+WWUl2AqvYihFJTezrSycavUMd70dKQIDAQAB",
   "description": "Discord 웹 통화의 화자별 음성을 ScamShield 분석 서버로 보낸다. 사용자가 켤 때만 동작한다.",
   "minimum_chrome_version": "116",
-  "permissions": ["storage", "tabs"],
-  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*", "https://*/*"],
-  "background": { "service_worker": "src/background.js" },
-  "action": { "default_popup": "popup.html", "default_title": "ScamShield" },
+  "permissions": [
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "ScamShield"
+  },
   "content_scripts": [
     {
-      "matches": ["https://discord.com/*"],
-      "js": ["src/hook.js"],
+      "matches": [
+        "https://discord.com/*"
+      ],
+      "js": [
+        "src/hook.js"
+      ],
       "run_at": "document_start",
       "world": "MAIN",
       "all_frames": false
     },
     {
-      "matches": ["https://discord.com/*"],
-      "js": ["src/relay.js"],
+      "matches": [
+        "https://discord.com/*"
+      ],
+      "js": [
+        "src/relay.js"
+      ],
       "run_at": "document_start",
       "all_frames": false
     }
