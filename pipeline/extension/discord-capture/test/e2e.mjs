@@ -9,6 +9,7 @@
  *  - 각 peer 파일의 주파수가 보낸 사인파(440·880Hz)와 맞다 → 섞이지 않았고 16kHz 로 제대로 바뀌었다
  *  - 길이가 수집한 시간과 맞다 (빠진 조각이 많지 않다)
  *  - 끄면 업로드 연결이 닫힌다
+ *  - (수신기 모드) 서버 SSE 경고가 팝업 목록·Discord 화면 배너에 뜨고, 재접속 재생으로 두 번 와도 한 번만 쌓인다
  */
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
@@ -40,7 +41,7 @@ const SERVER = process.env.SERVER;
 const recv = SERVER ? null : spawn(process.execPath, [join(ROOT, "dev/receiver.mjs"), "--port", String(RECV_PORT), "--out", out], { stdio: ["ignore", "pipe", "inherit"] });
 let recvLog = "";
 recv?.stdout.on("data", (d) => (recvLog += d));
-let mid;
+let mid, alertCheck, capturedMs;
 const page = createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(readFileSync(join(ROOT, "test/fake-discord.html")));
 }).listen(PAGE_PORT, "127.0.0.1");
@@ -78,11 +79,35 @@ try {
   await sleep(1500); // relay 포트 연결·트랙 발견 대기
   const started = await sw.evaluate((id) => self.ScamShield.startSession(id), tabId);
   console.log("시작:", started.session.callId);
+  const t0 = Date.now();
+  if (!SERVER) {
+    // 경고: 수신기에 이벤트를 넣으면 SSE 로 확장에 온다. replay 로 같은 id 를 한 번 더 보낸다
+    const recvUrl = `http://127.0.0.1:${RECV_PORT}`;
+    const callId = started.session.callId;
+    await sleep(1000);
+    const post = (path, body) => fetch(`${recvUrl}${path}?callId=${callId}`, { method: "POST", body: body && JSON.stringify(body) });
+    await post("/dev/alert", { type: "alert", level: "WARN", score: 68, message: "시험 경고 문구", reason: "시험 근거", evidenceSeqs: [1] });
+    await post("/dev/alert", { type: "action", action: "VERIFY", message: "시험 안내" });
+    await post("/dev/replay");
+    await sleep(1000);
+    const v = await sw.evaluate(() => self.ScamShield.view());
+    const banner = await tab.evaluate(() => {
+      const r = document.getElementById("scamshield-alert")?.shadowRoot;
+      return r && { title: r.querySelector(".title").textContent, msg: r.querySelector(".msg").textContent, why: r.querySelector(".why").textContent };
+    });
+    const popup = await context.newPage();
+    await popup.goto(`chrome-extension://${EXTENSION_ID}/popup.html`);
+    await popup.waitForSelector("#alerts li.WARN", { timeout: 5000 });
+    const popupText = await popup.locator("#alerts").innerText();
+    await popup.close();
+    alertCheck = { alerts: v.alerts, events: v.session.events, banner, popupText };
+  }
   await sleep(CAPTURE_MS);
   mid = await sw.evaluate(() => self.ScamShield.view());
   console.log("수집 중 상태:", JSON.stringify(mid.session.uploads), JSON.stringify(mid.tabs[0]?.status?.sources));
   assert.deepEqual(mid.session.errors, [], "수집 중 오류");
   await sw.evaluate(() => self.ScamShield.stopSession("test"));
+  capturedMs = Date.now() - t0;
   await sleep(800);
 } finally {
   await context?.close();
@@ -95,6 +120,7 @@ if (SERVER) {
   const ups = mid.session.uploads;
   console.table(ups.map(({ trackId, state, detail, seconds }) => ({ trackId, state, detail, seconds })));
   assert.deepEqual(ups.map((u) => u.trackId).sort(), ["me", "peer-0", "peer-1"]);
+  assert.equal(mid.session.events?.state, "open", `경고(SSE) 연결이 열리지 않았다: ${mid.session.events?.detail}`);
   for (const u of ups) {
     assert.equal(u.state, "open", `${u.trackId} 업로드가 열려 있지 않다: ${u.detail}`);
     assert.ok(u.seconds >= (CAPTURE_MS / 1000) * 0.8, `${u.trackId} ${u.seconds}s 만 보냈다`);
@@ -135,10 +161,23 @@ const freqs = peers.map((f) => results[f].hz).sort((a, b) => a - b);
 assert.ok(Math.abs(freqs[0] - 440) < 440 * 0.03, `낮은 쪽 ${freqs[0].toFixed(1)}Hz ≠ 440`);
 assert.ok(Math.abs(freqs[1] - 880) < 880 * 0.03, `높은 쪽 ${freqs[1].toFixed(1)}Hz ≠ 880`);
 for (const f of peers) {
-  assert.ok(results[f].seconds > (CAPTURE_MS / 1000) * 0.8, `${f} 길이 ${results[f].seconds.toFixed(2)}s 가 너무 짧다`);
-  assert.ok(results[f].seconds < (CAPTURE_MS / 1000) + 1.5, `${f} 길이 ${results[f].seconds.toFixed(2)}s 가 너무 길다`);
+  assert.ok(results[f].seconds > (capturedMs / 1000) * 0.8, `${f} 길이 ${results[f].seconds.toFixed(2)}s 가 너무 짧다 (수집 ${capturedMs}ms)`);
+  assert.ok(results[f].seconds < (capturedMs / 1000) + 1.5, `${f} 길이 ${results[f].seconds.toFixed(2)}s 가 너무 길다 (수집 ${capturedMs}ms)`);
 }
 assert.ok(/\[close\][^\n]*peer/.test(recvLog), "끈 뒤 업로드 연결이 닫히지 않았다");
 assert.ok(recvLog.includes(`origin=chrome-extension://${EXTENSION_ID}`), "업로드 Origin 이 고정 ID 가 아니다");
+
+// 경고
+console.log("경고:", JSON.stringify({ events: alertCheck.events, n: alertCheck.alerts.length, banner: alertCheck.banner }));
+assert.equal(alertCheck.events.state, "open", "SSE 가 열려 있지 않다: " + alertCheck.events.detail);
+assert.deepEqual(alertCheck.alerts.map((a) => [a.id, a.type]), [[1, "alert"], [2, "action"]], "경고가 중복되거나 빠졌다");
+assert.equal(alertCheck.alerts[0].level, "WARN");
+assert.equal(alertCheck.alerts[0].score, 68);
+assert.ok(alertCheck.banner, "Discord 화면에 경고 배너가 없다");
+assert.match(alertCheck.banner.title, /사기 위험.*68/);
+assert.equal(alertCheck.banner.msg, "시험 경고 문구");
+assert.equal(alertCheck.banner.why, "근거: 시험 근거");
+assert.match(alertCheck.popupText, /사기 위험 · 위험도 68/);
+assert.match(alertCheck.popupText, /안내 \(VERIFY\)/);
 rmSync(work, { recursive: true, force: true });
-console.log("OK: 화자별 분리·주파수·길이·종료 확인");
+console.log("OK: 화자별 분리·주파수·길이·종료·경고(SSE→배너·팝업, 중복 거름) 확인");

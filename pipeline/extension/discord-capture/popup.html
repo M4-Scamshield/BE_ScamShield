@@ -18,6 +18,15 @@
     .muted { color: #6B7280; }
     .err { color: #DC2626; white-space: pre-wrap; }
     .note { color: #6B7280; font-size: 12px; margin-top: 8px; }
+    h2 { font-size: 13px; margin: 12px 0 4px; display: flex; gap: 6px; align-items: baseline; }
+    h2 .muted { font-weight: 400; font-size: 12px; }
+    .alerts { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow-y: auto; }
+    .alerts li { border-left: 4px solid #D1D5DB; padding: 4px 8px; margin-bottom: 6px; background: #F9FAFB; }
+    .alerts li.WARN { border-color: #DC2626; }
+    .alerts li.SUSPECT { border-color: #B45309; }
+    .alerts .t { font-weight: 600; }
+    .alerts .why { color: #374151; font-size: 12px; white-space: pre-wrap; }
+    .alerts .msg { white-space: pre-wrap; }
   </style>
 </head>
 <body>
@@ -36,6 +45,8 @@
     <thead><tr><th>화자</th><th>트랙</th><th>업로드</th><th>보낸 초</th></tr></thead>
     <tbody id="rows"><tr><td colspan="4" class="muted">아직 잡힌 음성이 없습니다</td></tr></tbody>
   </table>
+  <h2>경고 <span id="events" class="muted"></span></h2>
+  <ul id="alerts" class="alerts"><li class="muted">아직 경고가 없습니다</li></ul>
   <p class="note">켜는 동안 이 탭의 통화 음성(내 마이크·상대)이 위 서버로 전송됩니다. 통화 상대에게 알리고 사용하세요.</p>
   <script src="popup.js"></script>
 </body>
