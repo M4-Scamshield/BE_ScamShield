@@ -41,7 +41,8 @@ scamshield:
     create-per-minute: 10        # IP 하나가 1분에 만들 수 있는 통화 수. 넘으면 429
   web:
     # 업로드 WS 허용 Origin (쉼표 구분). 배포 때 우리 도메인으로 바꾼다
-    allowed-origins: ${ALLOWED_ORIGINS:http://localhost:*,http://127.0.0.1:*}
+    # chrome-extension://opdocepfbahoocfkahckhnbhdedkibim = Discord 음성 수집 확장 (manifest key 로 ID 고정)
+    allowed-origins: ${ALLOWED_ORIGINS:http://localhost:*,http://127.0.0.1:*,chrome-extension://opdocepfbahoocfkahckhnbhdedkibim}
   roles: api,executor            # api = 업로드·SSE·입력 / executor = 작업 실행. 같은 jar, 프로필처럼 켠다
   kafka:
     topic: utterance

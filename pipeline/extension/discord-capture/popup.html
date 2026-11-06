@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>ScamShield</title>
+  <style>
+    body { font: 13px/1.45 -apple-system, "Apple SD Gothic Neo", sans-serif; width: 340px; margin: 0; padding: 12px; color: #111827; }
+    h1 { font-size: 14px; margin: 0 0 8px; }
+    .row { display: flex; gap: 6px; margin-bottom: 8px; }
+    input { flex: 1; font: inherit; padding: 4px 6px; border: 1px solid #D1D5DB; border-radius: 4px; }
+    button { font: inherit; padding: 4px 10px; border: 1px solid #D1D5DB; border-radius: 4px; background: #fff; cursor: pointer; }
+    button.primary { background: #1D4ED8; border-color: #1D4ED8; color: #fff; }
+    button.danger { background: #DC2626; border-color: #DC2626; color: #fff; }
+    button:disabled { opacity: .5; cursor: default; }
+    table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+    th, td { text-align: left; padding: 2px 4px; border-bottom: 1px solid #F3F4F6; font-variant-numeric: tabular-nums; }
+    th { color: #6B7280; font-weight: 500; }
+    .muted { color: #6B7280; }
+    .err { color: #DC2626; white-space: pre-wrap; }
+    .note { color: #6B7280; font-size: 12px; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <h1>ScamShield · Discord 음성 수집</h1>
+  <div class="row">
+    <input id="server" placeholder="http://localhost:8081" spellcheck="false">
+    <button id="save">저장</button>
+  </div>
+  <div class="row">
+    <button id="toggle" class="primary" disabled>수집 시작</button>
+    <span id="where" class="muted"></span>
+  </div>
+  <div id="error" class="err"></div>
+  <div id="call" class="muted"></div>
+  <table>
+    <thead><tr><th>화자</th><th>트랙</th><th>업로드</th><th>보낸 초</th></tr></thead>
+    <tbody id="rows"><tr><td colspan="4" class="muted">아직 잡힌 음성이 없습니다</td></tr></tbody>
+  </table>
+  <p class="note">켜는 동안 이 탭의 통화 음성(내 마이크·상대)이 위 서버로 전송됩니다. 통화 상대에게 알리고 사용하세요.</p>
+  <script src="popup.js"></script>
+</body>
+</html>

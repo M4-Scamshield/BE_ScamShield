@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ko">
+<head><meta charset="utf-8"><title>fake discord</title></head>
+<body>
+<p>테스트용 가짜 Discord: 연결 하나(max-bundle)에 원격 오디오 트랙 2개(440Hz·880Hz) + 내 마이크(가짜 장치).</p>
+<pre id="log"></pre>
+<script>
+  // hook.js 가 document_start 에 RTCPeerConnection·getUserMedia 를 감싼 뒤에 이 코드가 돈다 (Discord 와 같은 순서)
+  const log = (s) => (document.getElementById("log").textContent += s + "\n");
+  window.__fake = { ready: false };
+
+  async function main() {
+    const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+    log("mic: " + mic.getAudioTracks()[0].label);
+
+    // "상대 두 명": 서로 다른 주파수의 사인파
+    const ctx = new AudioContext({ sampleRate: 48000 });
+    const tone = (hz) => {
+      const o = ctx.createOscillator();
+      o.frequency.value = hz;
+      const g = ctx.createGain();
+      g.gain.value = 0.3;
+      const d = ctx.createMediaStreamDestination();
+      o.connect(g).connect(d);
+      o.start();
+      return d.stream.getAudioTracks()[0];
+    };
+    // Discord 클라이언트 역할 (hook 이 감싼 생성자). 먼저 만들어 첫 연결 번호(peer-<mid>)를 받는다
+    const discord = new RTCPeerConnection({ bundlePolicy: "max-bundle" });
+    // 서버(SFU) 역할. 같은 페이지라 이것도 hook 에 잡히므로, 이쪽은 아무것도 받지 않게 한다
+    const remote = new RTCPeerConnection({ bundlePolicy: "max-bundle" });
+    const s1 = new MediaStream([tone(440)]), s2 = new MediaStream([tone(880)]);
+    remote.addTrack(s1.getAudioTracks()[0], s1);
+    remote.addTrack(s2.getAudioTracks()[0], s2);
+    // 실제 Discord 는 마이크도 연결로 보내지만, 여기서 보내면 remote 쪽 수신 트랙으로 또 잡힌다.
+    // 내 목소리는 hook 이 getUserMedia 에서 직접 잡으므로 보내지 않아도 시험이 된다.
+    remote.onicecandidate = (e) => e.candidate && discord.addIceCandidate(e.candidate);
+    discord.onicecandidate = (e) => e.candidate && remote.addIceCandidate(e.candidate);
+
+    // Discord 처럼 받은 트랙을 <audio> 로 재생한다
+    discord.ontrack = (e) => {
+      const a = new Audio();
+      a.srcObject = new MediaStream([e.track]);
+      a.play().catch((err) => log("play: " + err));
+      log("ontrack mid=" + e.transceiver.mid);
+    };
+
+    await remote.setLocalDescription(await remote.createOffer());
+    await discord.setRemoteDescription(remote.localDescription);
+    await discord.setLocalDescription(await discord.createAnswer());
+    await remote.setRemoteDescription(discord.localDescription);
+    await new Promise((r) => {
+      const check = () => (discord.connectionState === "connected" ? r() : setTimeout(check, 50));
+      check();
+    });
+    log("connected");
+    window.__fake.ready = true;
+    window.__fake.hooked = !!window.__scamshieldCapture; // hook.js 가 먼저 돌았는지
+  }
+  main().catch((e) => { log("error: " + e); window.__fake.error = String(e); });
+</script>
+</body>
+</html>

@@ -79,7 +79,7 @@ python3 sql/load.py run1 30 5          # 30통화 × 화자 2 × 5발화 (DEV_EN
 | `stt.max-tracks-per-call` / `idle-seconds` | 4 / 30 | 통화당 화자 수(넘으면 1008, 같은 trackId 는 교체) / 음성이 안 오면 닫는 시간 |
 | `access.create-per-minute` | 10 | IP 당 분당 통화 생성 수. 넘으면 429 |
 | `sse.max-per-call` / `max-total` / `timeout-minutes` | 3 / 500 / 30 | SSE 연결 상한·수명 |
-| `web.allowed-origins` | localhost | 업로드 WS 허용 Origin. `ALLOWED_ORIGINS` 로 덮어쓴다 |
+| `web.allowed-origins` | localhost + Discord 확장 | 업로드 WS 허용 Origin. `ALLOWED_ORIGINS` 로 덮어쓴다. 확장은 `chrome-extension://opdocepfbahoocfkahckhnbhdedkibim` |
 | `dev.enabled` | false | 토큰 없는 개발용 입구. `DEV_ENDPOINTS=true` |
 
 예: `java -jar ... --scamshield.executor.workers=16 --scamshield.agent.fake.failure-rate=0.3`
