@@ -17,6 +17,7 @@ import scamshield.pipeline.common.ApiRole;
  *  - event: alert | action, id: eventSeq (통화 안에서 단조 증가), data: JSON
  *  - 재접속하면 Last-Event-ID(헤더, 또는 ?lastEventId=) 다음부터 outbox 에서 재생한다
  *  - 등록을 먼저 하고 재생하므로 사이에 생긴 이벤트가 두 번 갈 수 있다 → 클라이언트는 id 로 거른다
+ *  - 연결하자마자 주석(":ok")을 하나 보낸다 → 클라이언트가 열림을 바로 안다 (없으면 첫 하트비트까지 헤더가 안 나감)
  *  - 토큰이 틀리면 401, 인스턴스 전체 연결 상한을 넘으면 429 (통화당 상한은 오래된 연결을 닫는다). 연결은 timeout 뒤 닫히고 EventSource 가 알아서 다시 붙는다
  */
 @RestController
@@ -44,6 +45,7 @@ public class EventsController {
         long after = lastHeader != null ? lastHeader : lastParam != null ? lastParam : 0;
         SseEmitter emitter = new SseEmitter(timeoutMs);
         if (!hub.register(callId, emitter)) throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS);
+        if (!SseHub.hello(emitter)) return emitter;
         List<Map<String, Object>> rows = db.queryForList("""
                 select event_seq, event_type, cast(payload as char) as payload from outbox
                 where call_id = ? and event_seq > ? order by event_seq""", callId, after);
