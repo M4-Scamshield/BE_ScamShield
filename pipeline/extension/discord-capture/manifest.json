@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "ScamShield Discord 음성 수집",
+  "version": "0.1.0",
+  "description": "Discord 웹 통화의 화자별 음성을 ScamShield 분석 서버로 보낸다. 사용자가 켤 때만 동작한다.",
+  "minimum_chrome_version": "116",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*", "https://*/*"],
+  "background": { "service_worker": "src/background.js" },
+  "action": { "default_popup": "popup.html", "default_title": "ScamShield" },
+  "content_scripts": [
+    {
+      "matches": ["https://discord.com/*"],
+      "js": ["src/hook.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": false
+    },
+    {
+      "matches": ["https://discord.com/*"],
+      "js": ["src/relay.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ]
+}
