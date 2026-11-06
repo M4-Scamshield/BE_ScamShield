@@ -66,10 +66,10 @@ public class ResultApplier {
         List<Long> evidence = res.evidenceSeqs() == null ? List.of() : res.evidenceSeqs();
         db.update("""
                 insert into analysis_result(job_id, attempt, attempt_token, covered_from_seq, covered_to_seq, score,
-                    action, message, evidence_seqs, adopted_current, state_applied, agent_started_at, agent_finished_at)
-                values (?,?,?,?,?,?,?,?,cast(? as json),?,?,?,?)""",
+                    action, message, reason, evidence_seqs, adopted_current, state_applied, agent_started_at, agent_finished_at)
+                values (?,?,?,?,?,?,?,?,?,cast(? as json),?,?,?,?)""",
                 l.jobId(), l.attempt(), l.token(), l.coveredFrom(), l.coveredTo(), res.score(), res.action(),
-                res.message(), write(evidence), adoptCurrent, stateApplied,
+                res.message(), res.reason(), write(evidence), adoptCurrent, stateApplied,
                 Timestamp.from(agentStarted), Timestamp.from(agentFinished));
         // last_insert_id() 는 연결 단위라 같은 트랜잭션(같은 연결) 안에서 안전하다
         Long resultId = db.queryForObject("select last_insert_id()", Long.class);
@@ -96,7 +96,7 @@ public class ResultApplier {
                     l.callId(), eventSeq, resultId, level, res.score(), write(evidence));
             outbox(l.callId(), eventSeq, "alert", payload(
                     "eventSeq", eventSeq, "level", level == 2 ? "WARN" : "SUSPECT", "score", res.score(),
-                    "message", res.message(), "evidenceSeqs", evidence, "coveredTo", l.coveredTo()));
+                    "message", res.message(), "reason", res.reason(), "evidenceSeqs", evidence, "coveredTo", l.coveredTo()));
             db.update("update call_state set alert_level = ? where call_id = ?", level, l.callId());
         }
 

@@ -19,7 +19,13 @@ public class HttpAgentClient implements AgentClient {
 
     public HttpAgentClient(RestClient.Builder builder,
                            @Value("${scamshield.agent.url}") String url,
-                           @Value("${scamshield.agent.timeout-ms}") long timeoutMs) {
+                           @Value("${scamshield.agent.timeout-ms}") long timeoutMs,
+                           @Value("${scamshield.executor.lease-seconds}") int leaseSeconds) {
+        // 임대가 응답 대기보다 먼저 끝나면 같은 구간을 다른 실행기가 또 맡는다 → 설정 실수를 시작할 때 막는다
+        if (leaseSeconds * 1000L <= timeoutMs) {
+            throw new IllegalStateException("scamshield.executor.lease-seconds(" + leaseSeconds
+                    + "s) 는 scamshield.agent.timeout-ms(" + timeoutMs + "ms) 보다 길어야 한다");
+        }
         JdkClientHttpRequestFactory f = new JdkClientHttpRequestFactory(
                 HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build());
         f.setReadTimeout(Duration.ofMillis(timeoutMs));

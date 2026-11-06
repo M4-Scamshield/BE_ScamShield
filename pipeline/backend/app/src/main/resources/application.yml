@@ -49,13 +49,16 @@ scamshield:
   executor:
     workers: 4
     poll-interval-ms: 100
-    lease-seconds: 30            # AI 타임아웃(AI7) + 여유
+    # agent.timeout-ms 보다 길어야 한다. 짧으면 AI 응답을 기다리는 중에 임대가 풀려 다른 실행기가 같은 구간을
+    # 또 맡는다(JEV·Gemini 중복 호출). 늦은 결과는 토큰 확인으로 버려지지만 비용·지연이 두 배가 된다
+    lease-seconds: 70
     max-attempts: 3
     recover-interval-ms: 2000
   agent:
     mode: fake                   # fake | http
     url: http://localhost:9000/analyze
-    timeout-ms: 20000
+    # 다리 안에서 JEV(30초, agent 고정) + Gemini(GEMINI_TIMEOUT_SECONDS, 기본 20초) = 최대 50초 + 여유
+    timeout-ms: 55000
     context-size: 6              # 문맥 N (AI4, 3/6/10 비교 예정)
     fake:
       delay-ms: 800
