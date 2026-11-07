@@ -25,7 +25,7 @@ class CallServiceTest {
     void setUp() {
         callService =
                 new CallService(
-                        new CallRoomRepository(), new CallProperties(2, List.of("stun:example")));
+                        new CallRoomRepository(), new CallProperties(4, List.of("stun:example")));
     }
 
     private JoinResult join(String sessionId, String room) {
@@ -45,13 +45,28 @@ class CallServiceTest {
     }
 
     @Test
-    @DisplayName("1:1 통화라 3번째 입장은 ROOM_FULL")
+    @DisplayName("4번째 입장자는 먼저 온 3명과 그 세션을 돌려받는다")
+    void join_fourth_returnsThreeOthers() {
+        JoinResult a = join("s1", "room");
+        JoinResult b = join("s2", "room");
+        JoinResult c = join("s3", "room");
+
+        JoinResult d = join("s4", "room");
+
+        assertThat(d.others())
+                .extracting("id")
+                .containsExactly(a.self().id(), b.self().id(), c.self().id());
+        assertThat(d.otherSessionIds()).containsExactly("s1", "s2", "s3");
+    }
+
+    @Test
+    @DisplayName("정원 4명이 차면 5번째 입장은 ROOM_FULL")
     void join_roomFull() {
-        for (int i = 1; i <= 2; i++) {
+        for (int i = 1; i <= 4; i++) {
             join("s" + i, "room");
         }
 
-        assertThatThrownBy(() -> join("s3", "room"))
+        assertThatThrownBy(() -> join("s5", "room"))
                 .isInstanceOf(DomainException.class)
                 .extracting("errorCode")
                 .isEqualTo(CallErrorCode.ROOM_FULL);
@@ -86,6 +101,21 @@ class CallServiceTest {
     }
 
     @Test
+    @DisplayName("signal 은 여러 명이 있어도 지정한 상대의 세션 하나로만 전달된다")
+    void relay_targetsOnePeer() {
+        JoinResult a = join("s1", "room");
+        join("s2", "room");
+        JoinResult c = join("s3", "room");
+        join("s4", "room");
+        var data = JsonNodeFactory.instance.objectNode().put("x", 1);
+
+        CallService.Relay relay = callService.relay("s1", new SignalRequest(c.self().id(), data));
+
+        assertThat(relay.targetSessionId()).isEqualTo("s3");
+        assertThat(relay.message().from()).isEqualTo(a.self().id());
+    }
+
+    @Test
     @DisplayName("입장 전에 signal 을 보내면 NOT_JOINED")
     void relay_notJoined() {
         assertThatThrownBy(() -> callService.relay("nobody", new SignalRequest("p1", null)))
@@ -109,6 +139,21 @@ class CallServiceTest {
 
         JoinResult reopened = join("s3", "room");
         assertThat(reopened.callId()).isNotEqualTo(a.callId());
+    }
+
+    @Test
+    @DisplayName("4명 중 1명이 나가면 남은 3명의 세션을 돌려주고 통화는 이어진다")
+    void leave_oneOfFour_keepsCall() {
+        JoinResult a = join("s1", "room");
+        join("s2", "room");
+        join("s3", "room");
+        join("s4", "room");
+
+        LeaveResult left = callService.leave("s2").orElseThrow();
+
+        assertThat(left.callEnded()).isFalse();
+        assertThat(left.remainingSessionIds()).containsExactly("s1", "s3", "s4");
+        assertThat(join("s5", "room").callId()).isEqualTo(a.callId());
     }
 
     @Test
