@@ -5,8 +5,14 @@
  *
  *   node dev/receiver.mjs [--port 8081] [--out dev/out]
  *   POST /api/analysis/calls  → { callId, token, expiresInSeconds }
- *   WS   /ws/audio?callId&token&trackId&epoch   (PCM16 mono 16kHz)
+ *   WS   /ws/audio?callId&token&trackId&epoch   (PCM16 mono 16kHz). 통화당 화자 4개 상한(서버와 같음, 넘으면 1008)
+ *   GET  /api/analysis/calls/{callId}/events      (Bearer, SSE). 경고는 아래 개발용 주소로 넣는다
  *   저장: <out>/<callId>/<trackId>-e<epoch>.wav
+ *
+ * 시험용 (실제 서버에는 없음)
+ *   POST /dev/alert?callId=..   body {type:"alert"|"action", ...payload} → 그 통화 SSE 로 보낸다
+ *   POST /dev/replay?callId=..  지금까지 보낸 이벤트를 전부 다시 보낸다 (재접속 재생 중복 흉내)
+ *   GET  /dev/stats?callId=..   { maxConcurrent, tooMany } 동시에 열린 화자 수 최댓값, 상한으로 닫은 수
  *
  * 녹음 파일에는 통화 음성이 들어 있다. out 폴더는 git 에 넣지 않는다(.gitignore).
  */
@@ -27,6 +33,15 @@ const TRACK_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
 /** callId → token */
 const calls = new Map();
+const MAX_TRACKS = 4;
+/** callId → { tracks: Map<trackId, ws>, events: [{id,type,data}], streams: Set<res>, maxConcurrent, tooMany } */
+const state = new Map();
+const callState = (id) => {
+  if (!state.has(id)) state.set(id, { tracks: new Map(), events: [], streams: new Set(), maxConcurrent: 0, tooMany: 0 });
+  return state.get(id);
+};
+const sseWrite = (res, e) => res.write(`id:${e.id}\nevent:${e.type}\ndata:${e.data}\n\n`);
+const readBody = (req) => new Promise((ok) => { let b = ""; req.on("data", (d) => (b += d)); req.on("end", () => ok(b)); });
 /** 열린 녹음 */
 const open = new Set();
 
@@ -80,6 +95,47 @@ const http = createServer((req, res) => {
   // 확장 서비스 워커는 host_permissions 로 CORS 를 건너뛰지만, 브라우저 페이지에서 시험할 때를 위해 열어 둔다
   res.setHeader("Access-Control-Allow-Origin", "*");
   if (req.method === "OPTIONS") { res.writeHead(204, { "Access-Control-Allow-Methods": "POST" }).end(); return; }
+  const url = new URL(req.url, "http://x");
+  const ev = url.pathname.match(/^\/api\/analysis\/calls\/([^/]+)\/events$/);
+  if (req.method === "GET" && ev) {
+    const callId = decodeURIComponent(ev[1]);
+    const auth = req.headers.authorization || "";
+    if (!calls.has(callId) || auth !== `Bearer ${calls.get(callId)}`) { res.writeHead(401).end(); return; }
+    const st = callState(callId);
+    const after = Number(req.headers["last-event-id"] || 0);
+    res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
+    res.write(":hb\n\n");
+    for (const e of st.events) if (e.id > after) sseWrite(res, e);
+    st.streams.add(res);
+    console.log(`[sse] ${callId} 연결 (Last-Event-ID ${after})`);
+    req.on("close", () => st.streams.delete(res));
+    return;
+  }
+  if (url.pathname.startsWith("/dev/")) {
+    const callId = url.searchParams.get("callId");
+    if (!calls.has(callId)) { res.writeHead(404).end(); return; }
+    const st = callState(callId);
+    if (req.method === "GET" && url.pathname === "/dev/stats") {
+      res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ maxConcurrent: st.maxConcurrent, tooMany: st.tooMany, sse: st.streams.size }));
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/dev/replay") {
+      for (const r of st.streams) for (const e of st.events) sseWrite(r, e);
+      res.writeHead(204).end();
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/dev/alert") {
+      readBody(req).then((b) => {
+        const { type = "alert", ...payload } = JSON.parse(b || "{}");
+        const e = { id: st.events.length + 1, type, data: JSON.stringify({ eventSeq: st.events.length + 1, ...payload }) };
+        st.events.push(e);
+        for (const r of st.streams) sseWrite(r, e);
+        console.log(`[event] ${callId} #${e.id} ${type}`);
+        res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ id: e.id }));
+      });
+      return;
+    }
+  }
   if (req.method === "POST" && req.url === "/api/analysis/calls") {
     const callId = randomUUID().slice(0, 8);
     const token = randomBytes(16).toString("hex");
@@ -101,11 +157,22 @@ http.on("upgrade", (req, socket, head) => {
   if (!trackId || !TRACK_ID.test(trackId) || !/^\d{1,6}$/.test(epoch)) return reject("400 Bad Request");
   if (calls.get(callId) !== q.get("token")) return reject("401 Unauthorized");
   wss.handleUpgrade(req, socket, head, (ws) => {
+    const st = callState(callId);
+    if (!st.tracks.has(trackId) && st.tracks.size >= MAX_TRACKS) {
+      st.tooMany++;
+      console.log(`[reject] ${callId}/${trackId} 화자 상한 ${MAX_TRACKS}`);
+      ws.close(1008, "too many tracks");
+      return;
+    }
+    st.tracks.get(trackId)?.close(1000, "replaced");
+    st.tracks.set(trackId, ws);
+    st.maxConcurrent = Math.max(st.maxConcurrent, st.tracks.size);
     const rec = new Recording(callId, trackId, epoch);
     open.add(rec);
     console.log(`[open] ${callId}/${trackId} epoch ${epoch} origin=${req.headers.origin || "-"} → ${rec.path}`);
     ws.on("message", (data, isBinary) => { if (isBinary) rec.write(Buffer.from(data)); });
     ws.on("close", (code) => {
+      if (st.tracks.get(trackId) === ws) st.tracks.delete(trackId);
       console.log(`[close] ${callId}/${trackId} code ${code}  ${(rec.bytes / 2 / RATE).toFixed(1)}s 저장`);
       rec.close();
     });

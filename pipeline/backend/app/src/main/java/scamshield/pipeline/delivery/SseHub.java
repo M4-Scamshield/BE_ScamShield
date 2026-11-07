@@ -77,6 +77,20 @@ public class SseHub {
         }
     }
 
+    /**
+     * 연결 직후 주석 한 줄을 보낸다. 첫 바이트가 나가야 응답 헤더가 나가므로, 이게 없으면 클라이언트는
+     * 첫 하트비트(최대 heartbeat-seconds)까지 연결이 열렸는지 모른다 (EventSource onopen·fetch 가 그만큼 늦음).
+     */
+    static boolean hello(SseEmitter e) {
+        try {
+            synchronized (e) { e.send(SseEmitter.event().comment("ok")); }
+            return true;
+        } catch (IOException | IllegalStateException ex) {
+            e.completeWithError(ex);
+            return false;
+        }
+    }
+
     @Scheduled(fixedDelayString = "#{${scamshield.sse.heartbeat-seconds} * 1000}")
     public void heartbeat() {
         byCall.values().forEach(set -> set.forEach(e -> {
