@@ -3,8 +3,13 @@
 - agent 코드는 고치지 않는다. 팀 레포를 import 해서 CallPipeline.run_turn 을 부른다.
 - 상태를 여기서 들고 있지 않는다. 요청의 state.transcript 를 새 thread 에 심고, 이번 구간만 돌린 뒤
   결과 transcript 를 newState 로 돌려준다 → 같은 요청을 재시도해도 발화가 두 번 쌓이지 않는다.
-- 구간의 발화가 여러 개여도 agent 는 한 번만 돌린다(앞 발화는 transcript 에 심고 마지막 발화로 실행).
-  run_turn 한 번 = JEV 한 번(+ Yes 면 Gemini 한 번) 이라 발화 수만큼 외부 API 를 부르지 않는다.
+- 상대마다 따로 판단한다(나-A, 나-B …). 상대 발화는 transcript 에 "[상대:<trackId>]" 로 남기고,
+  agent 에는 쌍마다 [나]·사용자 입력 + 그 상대의 말만 "[상대]" 로 넘긴다(agent 코드는 그대로).
+  이번 구간에 말한 상대의 쌍만 다시 판단하고, [나]·사용자 입력이 새로 있으면 모든 쌍에 영향이 있어 전부 판단한다.
+  상대가 아직 없으면 [나] 말만으로 한 번 판단한다. 표시가 없는 옛 "[상대]" 줄은 누구 말인지 몰라 모든 쌍에 넣는다.
+- 쌍 하나 = run_turn 한 번(앞 발화는 transcript 에 심고 마지막 발화로 실행) = JEV 한 번(+ Yes 면 Gemini 한 번).
+  응답은 가장 위험한 쌍(WARN 먼저, 다음 score)을 따르고 reason 앞에 "[<trackId>]" 를 붙인다.
+  쌍 하나라도 실패하면 502 → 파이프라인이 구간 전체를 재시도한다.
 
 결과 변환 (판단은 agent, 여기서는 형식만 바꾼다)
   jev_decision.probability → score = round(p × 100)
@@ -22,6 +27,7 @@
 import argparse
 import json
 import os
+import re
 import sys
 import time
 import uuid
@@ -43,10 +49,32 @@ def speaker(track_id: str | None) -> str:
     return "나" if track_id == "me" else "상대"
 
 
+def turn_peer(t: dict) -> str | None:
+    """상대 발화면 그 trackId, [나]·사용자 입력이면 None (모든 쌍에 들어간다)."""
+    if t.get("kind") == "INPUT" or speaker(t.get("trackId")) == "나":
+        return None
+    return t.get("trackId")
+
+
 def turn_text(t: dict) -> str:
+    """newState 에 남기는 줄. 상대 발화는 쌍을 나눌 수 있게 trackId 를 붙인다."""
     if t.get("kind") == "INPUT":
         return f"[사용자 입력 {t.get('inputType')}] {t['text']}"
-    return f"[{speaker(t.get('trackId'))}] {t['text']}"
+    peer = turn_peer(t)
+    return f"[상대:{peer}] {t['text']}" if peer else f"[{speaker(t.get('trackId'))}] {t['text']}"
+
+
+PEER_LINE = re.compile(r"^\[상대:([^\]]+)\] ")
+
+
+def line_peer(line: str) -> str | None:
+    m = PEER_LINE.match(line)
+    return m.group(1) if m else None
+
+
+def pair_lines(lines: list[str], peer: str | None) -> list[str]:
+    """나-peer 쌍이 agent 에 넘길 줄. 다른 상대의 말은 빼고 표시는 agent 가 읽는 "[상대]" 로 되돌린다."""
+    return [PEER_LINE.sub("[상대] ", line) for line in lines if line_peer(line) in (None, peer)]
 
 
 # 파이프라인은 score 만으로도 경고 단계를 정한다(ResultApplier: 40 이상 SUSPECT, 70 이상 WARN)
@@ -80,21 +108,35 @@ class Bridge:
         if not turns:
             return 400, {"error": "turns 가 비어 있다"}
         prior = (req.get("state") or {}).get("transcript") or []
-        lines = [turn_text(t) for t in turns]
-        # 요청마다 새 thread: 재시도·동시 실행이 서로 섞이지 않는다
+        transcript = list(prior) + [turn_text(t) for t in turns]
+        known = list(dict.fromkeys(p for p in map(line_peer, transcript) if p))
+        if any(turn_peer(t) is None for t in turns):
+            targets = known or [None]
+        else:
+            targets = list(dict.fromkeys(turn_peer(t) for t in turns))
+        best = None
+        for peer in targets:
+            out = self._run(req, pair_lines(transcript, peer))
+            if "error" in out:
+                return 502, {"error": out["error"]}
+            res = to_response(out, [t for t in turns if turn_peer(t) in (None, peer)])
+            if peer and res["reason"]:
+                res["reason"] = f"[{peer}] {res['reason']}"
+            if best is None or (res["action"] == "WARN", res["score"]) > (best["action"] == "WARN", best["score"]):
+                best = res
+        return 200, {**best, "newState": {"transcript": transcript}}
+
+    def _run(self, req: dict, lines: list[str]) -> dict:
+        # 쌍마다 새 thread: 재시도·동시 실행·다른 쌍이 서로 섞이지 않는다
         tid = f"{req['callId']}:{req.get('jobId')}:{req.get('attempt')}:{uuid.uuid4().hex[:8]}"
         graph = self.pipeline.graph
         try:
-            seed = list(prior) + lines[:-1]
-            if seed:
-                graph.update_state({"configurable": {"thread_id": tid}}, {"transcript": seed}, as_node=SEED_AS_NODE)
-            out = self.pipeline.run_turn(tid, lines[-1])
-            if "error" in out:
-                return 502, {"error": out["error"]}
-            transcript = self.pipeline.state(tid).get("transcript", [])
+            if lines[:-1]:
+                graph.update_state({"configurable": {"thread_id": tid}}, {"transcript": lines[:-1]},
+                                   as_node=SEED_AS_NODE)
+            return self.pipeline.run_turn(tid, lines[-1])
         finally:
             graph.checkpointer.delete_thread(tid)
-        return 200, {**to_response(out, turns), "newState": {"transcript": transcript}}
 
 
 def make_handler(bridge: Bridge):

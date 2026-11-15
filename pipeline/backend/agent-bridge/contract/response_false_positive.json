@@ -2,7 +2,7 @@
   "score": 39,
   "action": "OBSERVE",
   "message": null,
-  "reason": "카드사 본인 확인 절차이며 송금·인증번호 요구가 없다",
+  "reason": "[peer-1] 카드사 본인 확인 절차이며 송금·인증번호 요구가 없다",
   "evidenceSeqs": [],
-  "newState": {"transcript": ["[상대] 카드사 이상거래 확인 전화입니다"]}
+  "newState": {"transcript": ["[상대:peer-1] 카드사 이상거래 확인 전화입니다"]}
 }
