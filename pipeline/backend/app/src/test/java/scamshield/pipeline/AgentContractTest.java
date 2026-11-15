@@ -51,6 +51,21 @@ class AgentContractTest extends PipelineTestSupport {
     }
 
     @Test
+    @DisplayName("오탐(JEV Yes → Gemini 재판단 false) 응답: 근거는 저장하고 경고는 내지 않는다")
+    void falsePositiveRaisesNoAlert() throws Exception {
+        AnalysisResponse fp = read("response_false_positive.json");
+        assertEquals(AnalysisResponse.OBSERVE, fp.action());
+        assertNull(fp.message());
+        assertTrue(fp.evidenceSeqs().isEmpty());
+
+        accept(CALL, 1, "카드사 이상거래 확인 전화입니다");
+        apply(lease(), new AnalysisResponse(fp.score(), fp.action(), fp.message(), fp.reason(), List.of(), null));
+
+        assertEquals(fp.reason(), db.queryForObject("select reason from analysis_result", String.class));
+        assertEquals(0, db.queryForObject("select count(*) from alert", Integer.class));
+    }
+
+    @Test
     @DisplayName("근거(reason)는 결과에 저장되고 경고 이벤트(SSE)에 실린다")
     void reasonReachesAlert() throws Exception {
         accept(CALL, 1, "서울중앙지검입니다");

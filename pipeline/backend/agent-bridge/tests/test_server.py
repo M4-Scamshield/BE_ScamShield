@@ -37,7 +37,13 @@ class FixedAnalyst:
 
     def analyze(self, state):
         self.calls += 1
-        return {"reason": "기관 사칭 뒤 안전계좌 송금 요구", "response": "송금을 멈추고 기관 대표번호로 확인하세요."}
+        return {"is_phishing": True, "reason": "기관 사칭 뒤 안전계좌 송금 요구",
+                "response": "송금을 멈추고 기관 대표번호로 확인하세요."}
+
+
+class FalsePositiveAnalyst:
+    def analyze(self, state):
+        return {"is_phishing": False, "reason": "카드사 본인 확인 절차이며 송금·인증번호 요구가 없다", "response": None}
 
 
 class FailingDetector:
@@ -76,6 +82,14 @@ def test_no_matches_contract_and_skips_gemini():
     assert code == 200
     assert body == load("response_no.json")
     assert ana.calls == 0
+
+
+def test_false_positive_matches_contract_and_raises_no_alert():
+    """JEV Yes 를 Gemini 가 오탐으로 보면 WARN 도, score 로 인한 SUSPECT(40) 도 나가지 않는다."""
+    code, body = server.Bridge(CallPipeline(FixedDetector("Yes", 0.84), FalsePositiveAnalyst())).analyze(
+        request([speech(5, "peer-1", "카드사 이상거래 확인 전화입니다")]))
+    assert code == 200
+    assert body == load("response_false_positive.json")
 
 
 def test_retry_with_same_state_does_not_duplicate_transcript():

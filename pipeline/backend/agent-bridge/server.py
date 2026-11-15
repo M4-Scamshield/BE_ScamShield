@@ -8,8 +8,9 @@
 
 결과 변환 (판단은 agent, 여기서는 형식만 바꾼다)
   jev_decision.probability → score = round(p × 100)
-  jev_decision.verdict     → action: Yes = WARN, No = OBSERVE
-  analysis.response        → message (사용자 안내),  analysis.reason → reason (탐지 근거)
+  jev_decision.verdict + analysis.is_phishing → action: Yes 이고 Gemini 도 피싱(true) = WARN, 그 외 OBSERVE
+  analysis.response        → message (사용자 안내),  analysis.reason → reason (탐지 근거·오탐 근거)
+  Gemini 가 JEV 의 Yes 를 오탐(false)으로 보면 score 를 SUSPECT(40) 미만으로 낮춰 경고를 내지 않는다.
 
 대기 시간: JEV 30초(agent 고정) + Gemini GEMINI_TIMEOUT_SECONDS(기본 20초) 안에 끝난다.
   파이프라인 쪽 agent.timeout-ms 와 executor.lease-seconds 는 이 합보다 길어야 한다(application.yml).
@@ -48,17 +49,25 @@ def turn_text(t: dict) -> str:
     return f"[{speaker(t.get('trackId'))}] {t['text']}"
 
 
+# 파이프라인은 score 만으로도 경고 단계를 정한다(ResultApplier: 40 이상 SUSPECT, 70 이상 WARN)
+FALSE_POSITIVE_MAX_SCORE = 39
+
+
 def to_response(out: dict, turns: list[dict]) -> dict:
     """agent 결과 → 계약 ② 응답. newState 는 호출한 쪽이 transcript 로 채운다."""
     decision = out["jev_decision"]
     analysis = out.get("analysis") or {}
     yes = decision["verdict"] == "Yes"
+    warn = yes and analysis.get("is_phishing") is True
+    score = round(decision["probability"] * 100)
+    if yes and not warn:
+        score = min(score, FALSE_POSITIVE_MAX_SCORE)
     return {
-        "score": round(decision["probability"] * 100),
-        "action": "WARN" if yes else "OBSERVE",
+        "score": score,
+        "action": "WARN" if warn else "OBSERVE",
         "message": analysis.get("response"),
         "reason": analysis.get("reason"),
-        "evidenceSeqs": [t["seq"] for t in turns] if yes else [],
+        "evidenceSeqs": [t["seq"] for t in turns] if warn else [],
     }
 
 
