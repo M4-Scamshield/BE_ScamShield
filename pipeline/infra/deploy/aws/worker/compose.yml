@@ -1,0 +1,18 @@
+# scamshield-worker 서버용. 서버의 ~/deploy 에 두고 실행: docker compose up -d --build
+# 코드는 ~/src 아래 팀 레포 clone (BE_ScamShield = 다리 코드, scam-agent = AI 코드. agent 는 고치지 않고 복사만).
+# 비밀값(TYPESAFE·Gemini) 은 같은 폴더 .env (커밋 안 함). 이 키는 worker 에만 있고 app 은 모른다.
+name: scamshield-worker
+
+services:
+  bridge:
+    build:
+      context: ../src/BE_ScamShield/pipeline/backend/agent-bridge
+      additional_contexts:
+        agent: ../src/scam-agent
+    restart: unless-stopped
+    # app 이 사설 IP 172.31.15.97:9000 으로 부른다. 밖에서는 SG(9000 ← app-sg 만) 가 막는다
+    ports:
+      - "9000:9000"
+    env_file: .env
+    environment:
+      GEMINI_TIMEOUT_SECONDS: ${GEMINI_TIMEOUT_SECONDS:-20}   # JEV 30 + 이 값 < app 의 agent.timeout-ms(55초)
