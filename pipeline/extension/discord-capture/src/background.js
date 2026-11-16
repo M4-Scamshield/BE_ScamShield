@@ -13,7 +13,8 @@
  * 서버는 30초 동안 프레임이 없으면 닫으므로, 조용하면 5초마다 100ms 무음을 보낸다.
  * 사용자가 켤 때만 동작하고, Discord 탭이 닫히면 같이 꺼진다.
  */
-const DEFAULT_SERVER = "http://localhost:8081";
+// 팝업에서 주소를 저장한 적이 없으면 여기로 보낸다. 설치만 하면 바로 운영 서버에 붙도록 (개발 수신기는 팝업에 localhost 를 넣는다)
+const DEFAULT_SERVER = "https://boostad.site";
 const ACTIVATE_PEAK = 0.02;
 const KEEPALIVE_MS = 5000;
 const SILENCE = new Uint8Array(3200);
