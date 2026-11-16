@@ -24,6 +24,17 @@ discord.com 탭                                  확장 서비스 워커        
   `alert`·`action` 모두 팝업 **경고** 목록에 뜬다(최근 20개). 끊기면 Last-Event-ID 로 이어 받고, 같은 id 는 한 번만 보인다
 - 기본은 꺼짐. 팝업에서 **수집 시작**을 눌러야 보낸다. 탭을 닫으면 끝난다
 
+## 시연용으로 나눠 주기 (터미널 없이 설치)
+
+기본 서버 주소가 운영 서버 `https://boostad.site` 라서, 받는 사람은 설치만 하면 바로 붙는다.
+
+```bash
+bash pack.sh      # → dist/scamshield-discord-extension.zip (manifest·popup·src + README.txt(설치 방법) 만. 녹음·node_modules·테스트 제외)
+```
+
+받는 사람: zip 풀기 → `chrome://extensions` → 개발자 모드 → **압축해제된 확장 프로그램 로드** → 푼 폴더
+→ discord.com 탭 새로고침 → 음성 채널 입장 → 확장 아이콘 → **수집 시작**. (자세한 건 zip 안 `README.txt`)
+
 ## 써 보기 (개발용 수신 서버)
 
 ```bash
@@ -34,7 +45,7 @@ npm run receiver          # http://127.0.0.1:8081, 받은 음성을 dev/out/<cal
 
 1. `chrome://extensions` → 개발자 모드 → **압축해제된 확장 프로그램 로드** → 이 폴더
 2. discord.com 탭을 **새로고침** (hook 이 페이지보다 먼저 돌아야 한다)
-3. 음성 채널 입장 → 확장 아이콘 → 서버 `http://localhost:8081` → **수집 시작**
+3. 음성 채널 입장 → 확장 아이콘 → 서버 칸에 `http://localhost:8081` 입력·저장 (기본값은 운영 서버라 꼭 바꾼다) → **수집 시작**
 4. 팝업 표에 `나 (me)`, `peer-0`, `peer-1` … 이 뜨고 "보낸 초"가 올라가면 정상. 경고 옆이 "받는 중"이면 SSE 도 붙은 것
 5. `dev/out/` 의 WAV 를 들어 본다. 화자마다 따로 녹음돼 있어야 한다
 6. 경고 화면 보기: 수신기에 가짜 경고를 넣는다 (callId 는 팝업 맨 위)
@@ -47,7 +58,7 @@ npm run receiver          # http://127.0.0.1:8081, 받은 음성을 dev/out/<cal
 
 ## 실제 분석 서버에 붙일 때
 
-- 팝업의 서버 주소를 분석 서버로 바꾼다 (예: `https://<서버>`; WS 는 자동으로 `wss://`)
+- 기본값은 운영 서버 `https://boostad.site` (`src/background.js` 의 `DEFAULT_SERVER`). 다른 서버는 팝업에서 주소를 저장한다 (WS 는 자동으로 `wss://`)
 - 확장 ID 는 manifest `key` 로 **`opdocepfbahoocfkahckhnbhdedkibim` 고정**이다(누가 어느 폴더에서 로드해도 같다).
   서버 기본값(`application.yml`)에는 이미 `chrome-extension://opdocepfbahoocfkahckhnbhdedkibim` 이 들어 있다.
 - 배포에서 `ALLOWED_ORIGINS` 를 직접 줄 때는 뒤에 붙인다. 빠지면 WS 가 1006 으로 끊긴다.
