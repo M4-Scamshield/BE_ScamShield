@@ -86,10 +86,10 @@ class CrashRecoveryTest extends PipelineTestSupport {
 
         assertEquals(1, count("select count(*) from analysis_result"));
         assertEquals(1, count("select count(*) from alert"));
-        assertEquals(1, count("select count(*) from outbox where sent_at is null"),
+        assertEquals(1, count("select count(*) from outbox where sent_at is null and event_type = 'alert'"),
                 "경고와 outbox 가 같은 트랜잭션이라 '결과는 있는데 알릴 방법이 없는' 상태가 안 생긴다");
 
-        assertEquals(1, relayOnce());
+        assertEquals(2, relayOnce(), "전사 1 + 경고 1");
         assertEquals(0, count("select count(*) from outbox where sent_at is null"));
         assertConverged();
     }
@@ -125,10 +125,10 @@ class CrashRecoveryTest extends PipelineTestSupport {
         relayOnce();
 
         // 릴레이가 보내고 커밋하기 전에 죽었다 → 같은 행이 다시 대상이 된다
-        db.update("update outbox set sent_at = null");
+        db.update("update outbox set sent_at = null where event_type = 'alert'");
         assertEquals(1, relayOnce(), "전송은 두 번 일어난다 — 이걸 0으로 만드는 게 목표가 아니다");
         assertEquals(1, count("select count(*) from alert"), "목표는 같은 경고가 두 건 생기지 않는 것");
-        assertEquals(1, count("select count(*) from outbox"));
+        assertEquals(1, count("select count(*) from outbox where event_type = 'alert'"));
 
         apply(l, analyze(l));   // 같은 임대의 결과가 한 번 더 와도
         assertEquals(1, count("select count(*) from analysis_result"), "DONE 이라 토큰 확인에서 버린다");

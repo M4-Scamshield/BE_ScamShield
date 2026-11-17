@@ -54,19 +54,22 @@ class AgentStateTest extends PipelineTestSupport {
     @Test
     @DisplayName("경고와 행동은 한 순번(eventSeq)을 같이 쓰고 outbox 에 빈틈없이 쌓인다")
     void alertAndActionShareEventSeq() throws Exception {
-        accept(CALL, 1, "보내드린 링크로 앱 설치하세요");   // SUSPECT 경고(1) + ACQUIRE(2)
+        accept(CALL, 1, "보내드린 링크로 앱 설치하세요");   // 전사(1) → SUSPECT 경고(2) + ACQUIRE(3)
         runOne();
-        accept(CALL, 2, "검찰입니다 계좌가 연루됐습니다");  // WARN 경고(3)
+        accept(CALL, 2, "검찰입니다 계좌가 연루됐습니다");  // 전사(4) → WARN 경고(5)
         runOne();
 
-        assertEquals(java.util.List.of(1L, 2L, 3L),
+        assertEquals(java.util.List.of(1L, 2L, 3L, 4L, 5L),
                 db.queryForList("select event_seq from outbox where call_id = ? order by event_seq", Long.class, CALL));
-        assertEquals(3, count("select last_event_seq from call_state where call_id = ?", CALL));
+        assertEquals(java.util.List.of("utterance", "alert", "action", "utterance", "alert"),
+                db.queryForList("select event_type from outbox where call_id = ? order by event_seq", String.class, CALL));
+        assertEquals(5, count("select last_event_seq from call_state where call_id = ?", CALL));
         assertEquals(2, count("select alert_level from call_state where call_id = ?", CALL));
 
         accept(CALL, 3, "네");
         runOne();
         assertEquals(2, count("select alert_level from call_state where call_id = ?", CALL), "경고 단계는 내려가지 않는다");
-        assertEquals(3, count("select count(*) from outbox"));
+        assertEquals(3, count("select count(*) from outbox where event_type in ('alert','action')"), "새 경고·행동은 없다");
+        assertEquals(6, count("select count(*) from outbox"), "전사(3) + 경고·행동(3)");
     }
 }
