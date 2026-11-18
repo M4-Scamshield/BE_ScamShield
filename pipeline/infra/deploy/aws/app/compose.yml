@@ -1,0 +1,58 @@
+# scamshield-app 서버용. 서버의 ~/deploy 에 두고 실행: docker compose up -d --build
+# 코드는 ~/src 아래 팀 레포 clone (BE_ScamShield·FE_Scamshield). 비밀값은 같은 폴더 .env (커밋 안 함).
+# 밖에 여는 건 caddy(80·443) 하나. api·signal 은 ports: 가 없어 caddy 만 닿는다.
+# Kafka·다리(같은 kafka 서버)·RDS 는 다른 서버 → 사설 IP 로 붙는다(각 SG 가 app-sg 만 허용).
+name: scamshield-app
+
+services:
+  # 분석 파이프라인 (내 파트, 8081)
+  api:
+    build: ../src/BE_ScamShield/pipeline/backend/app
+    restart: unless-stopped
+    environment:
+      # RDS 엔드포인트는 .env 의 DB_HOST (공개 레포라 주소를 박지 않는다)
+      SPRING_DATASOURCE_URL: jdbc:mysql://${DB_HOST:?}:3306/scamshield?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true
+      DB_PASSWORD: ${DB_PASSWORD:?}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: 172.31.0.192:9092
+      SCAMSHIELD_AGENT_MODE: http
+      SCAMSHIELD_AGENT_URL: http://172.31.0.192:9000/analyze   # 다리는 kafka 서버에 같이 산다(11-18, worker 서버에서 옮김)
+      STT_MODE: ${STT_MODE:-rtzr}
+      RTZR_CLIENT_ID: ${RTZR_CLIENT_ID:-}
+      RTZR_CLIENT_SECRET: ${RTZR_CLIENT_SECRET:-}
+      DEV_ENDPOINTS: "false"
+      ALLOWED_ORIGINS: https://boostad.site,chrome-extension://opdocepfbahoocfkahckhnbhdedkibim
+      # caddy 가 붙인 X-Forwarded-For 로 진짜 IP 를 본다 (통화 생성·STT IP 상한)
+      SERVER_FORWARD_HEADERS_STRATEGY: native
+      # actuator 는 다른 포트로 뗀다. caddy 는 8081 만 넘긴다
+      MANAGEMENT_SERVER_PORT: "8082"
+      # t3.small 2GB 에 api·signal·caddy 가 같이 산다 → 힙을 직접 정한다 (Dockerfile 의 MaxRAMPercentage 보다 우선)
+      JAVA_TOOL_OPTIONS: -Xmx512m
+      # 가상 스레드 끔 (11-15 실측): vCPU 2 → 운반 스레드 2개를 Kafka 소비자가 붙잡고(JDK 21 pinning) 놓지 않아
+      # Tomcat 요청 스레드가 못 돌고 API 전체가 멈췄다. 로컬 Mac(10코어)에선 안 보임. JDK 24+ 로 올리면 다시 켜도 된다
+      SPRING_THREADS_VIRTUAL_ENABLED: "false"
+
+  # 팀 시그널링 BE (8080): 통화 방 REST + /ws/signal. DB·키 없음
+  signal:
+    build:
+      context: ../src/BE_ScamShield
+      dockerfile: ../../deploy/signal.Dockerfile
+    restart: unless-stopped
+    environment:
+      JAVA_TOOL_OPTIONS: -Xmx192m
+
+  caddy:
+    image: caddy:2.10
+    restart: unless-stopped
+    depends_on: [api, signal]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../src/FE_Scamshield/dist:/srv/fe:ro
+      - caddydata:/data      # 인증서. 지우면 다시 발급받는다(LE 발급 횟수 제한 주의)
+      - caddyconfig:/config
+
+volumes:
+  caddydata:
+  caddyconfig:
