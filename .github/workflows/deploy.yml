@@ -1,0 +1,124 @@
+# 운영 배포 (https://boostad.site). dev 에 push(= PR 머지)되면 테스트 → 바뀐 서비스만 다시 빌드해 띄운다.
+# 운영 서버 2대에 각각 self-hosted 러너가 있다 (서버 구성: pipeline/infra/deploy/aws/README.md).
+#   scamshield-app   : api(pipeline/backend/app) · signal(루트 시그널링 BE)
+#   scamshield-kafka : bridge(pipeline/backend/agent-bridge + scam-agent main)
+# 러너는 코드를 따로 받지 않고 서버의 ~/src clone 을 fast-forward 한 뒤 docker compose 로 다시 띄운다.
+# PR 로는 절대 돌지 않는다(공개 레포라 PR 코드가 운영 서버에서 돌면 안 된다).
+name: Deploy
+
+on:
+  push:
+    branches: [dev]
+    paths-ignore: ["**/*.md"]
+  workflow_dispatch:
+    inputs:
+      all:
+        description: 바뀐 것과 상관없이 전부 다시 빌드 (scam-agent 만 바뀌었을 때도 이걸로)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# 배포는 겹치지 않게 한 줄로. 도는 중인 배포는 끊지 않는다
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+
+  app:
+    name: app 서버 (api · signal)
+    needs: test
+    runs-on: [self-hosted, scamshield-app]
+    timeout-minutes: 30
+    env:
+      ALL: ${{ inputs.all || false }}
+    steps:
+      - name: 코드 갱신
+        id: src
+        run: |
+          set -euo pipefail
+          cd ~/src/BE_ScamShield
+          old=$(git rev-parse HEAD)
+          git fetch --quiet origin dev
+          git merge --ff-only --quiet "$GITHUB_SHA"
+          changed=$(git diff --name-only "$old" HEAD)
+          svcs=""
+          if [ "$ALL" = true ] || grep -qE '^pipeline/backend/app/' <<<"$changed"; then svcs="$svcs api"; fi
+          if [ "$ALL" = true ] || grep -qE '^(src/|gradle/|build\.gradle$|settings\.gradle$|gradlew$)' <<<"$changed"; then svcs="$svcs signal"; fi
+          echo "이전 $old → 지금 $(git rev-parse HEAD), 다시 띄울 것:${svcs:- 없음}"
+          echo "old=$old" >> "$GITHUB_OUTPUT"
+          echo "svcs=$svcs" >> "$GITHUB_OUTPUT"
+      - name: 빌드 · 재시작
+        if: steps.src.outputs.svcs != ''
+        run: |
+          set -euo pipefail
+          cd ~/deploy
+          docker compose up -d --build ${{ steps.src.outputs.svcs }}
+      - name: 살아났는지 확인
+        if: steps.src.outputs.svcs != ''
+        run: |
+          set -euo pipefail
+          cd ~/deploy
+          # api·signal 은 밖에 포트가 없어 caddy 컨테이너 안에서 찌른다
+          check() { docker compose exec -T caddy wget -qO- "$1" >/dev/null 2>&1; }
+          for s in ${{ steps.src.outputs.svcs }}; do
+            case $s in
+              api)    url=http://api:8082/actuator/health ;;
+              signal) url=http://signal:8080/api/calls/config ;;
+            esac
+            for _ in $(seq 1 60); do check "$url" && { echo "$s OK"; continue 2; }; sleep 3; done
+            echo "::error::$s 가 3분 안에 응답하지 않는다. 되돌리기: cd ~/src/BE_ScamShield && git reset --hard ${{ steps.src.outputs.old }} && cd ~/deploy && docker compose up -d --build $s"
+            docker compose logs --tail 80 "$s" | grep -vE 'transcript|text=' || true
+            exit 1
+          done
+          docker image prune -f >/dev/null
+
+  bridge:
+    name: kafka 서버 (AI 다리)
+    needs: test
+    runs-on: [self-hosted, scamshield-kafka]
+    timeout-minutes: 20
+    env:
+      ALL: ${{ inputs.all || false }}
+    steps:
+      - name: 코드 갱신
+        id: src
+        run: |
+          set -euo pipefail
+          cd ~/src/BE_ScamShield
+          old=$(git rev-parse HEAD)
+          git fetch --quiet origin dev
+          git merge --ff-only --quiet "$GITHUB_SHA"
+          changed=$(git diff --name-only "$old" HEAD)
+          cd ~/src/scam-agent
+          old_agent=$(git rev-parse HEAD)
+          git pull --ff-only --quiet origin main
+          go=false
+          if [ "$ALL" = true ] || grep -qE '^pipeline/backend/agent-bridge/' <<<"$changed" || [ "$old_agent" != "$(git rev-parse HEAD)" ]; then go=true; fi
+          echo "BE $old → $(git -C ~/src/BE_ScamShield rev-parse HEAD), scam-agent $old_agent → $(git rev-parse HEAD), 다시 띄움: $go"
+          echo "old=$old" >> "$GITHUB_OUTPUT"
+          echo "old_agent=$old_agent" >> "$GITHUB_OUTPUT"
+          echo "go=$go" >> "$GITHUB_OUTPUT"
+      - name: 빌드 · 재시작
+        if: steps.src.outputs.go == 'true'
+        run: |
+          set -euo pipefail
+          cd ~/bridge
+          docker compose up -d --build bridge
+      - name: 살아났는지 확인
+        if: steps.src.outputs.go == 'true'
+        run: |
+          set -euo pipefail
+          # 빈 요청엔 400 을 돌려준다 = 떠 있다 (agent·키는 부르지 않는다)
+          for _ in $(seq 1 40); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' http://localhost:9000/analyze || true)
+            [ "$code" = 400 ] && { echo "bridge OK"; docker image prune -f >/dev/null; exit 0; }
+            sleep 3
+          done
+          echo "::error::다리가 2분 안에 응답하지 않는다. 되돌리기: git -C ~/src/BE_ScamShield reset --hard ${{ steps.src.outputs.old }}; git -C ~/src/scam-agent reset --hard ${{ steps.src.outputs.old_agent }}; cd ~/bridge && docker compose up -d --build bridge"
+          docker compose -f ~/bridge/compose.yml logs --tail 80 bridge || true
+          exit 1

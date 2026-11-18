@@ -1,0 +1,64 @@
+# 테스트. PR 마다 GitHub 서버(ubuntu-latest)에서 돌고, deploy.yml 도 배포 전에 이걸 부른다.
+# 운영 서버(self-hosted 러너)는 여기서 쓰지 않는다 — PR 코드를 운영 서버에서 돌리지 않기 위해.
+name: CI
+
+on:
+  pull_request:
+    paths-ignore: ["**/*.md"]
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  signal:
+    name: 시그널링 BE (루트 Gradle)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with: { distribution: temurin, java-version: "21", cache: gradle }
+      - run: ./gradlew test --no-daemon
+
+  pipeline:
+    name: 분석 파이프라인 (pipeline/backend/app)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: pipeline/backend/app
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+          cache-dependency-path: pipeline/backend/app/*.gradle.kts
+      # Testcontainers 가 MySQL 8.4 컨테이너를 띄운다 (러너에 Docker 가 있다)
+      - run: ./gradlew test --no-daemon
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pipeline-test-report
+          path: pipeline/backend/app/build/reports/tests/test
+
+  bridge:
+    name: AI 다리 (agent-bridge pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # 다리는 scam-agent 코드를 import 한다. 운영과 같은 main 을 받는다
+      - uses: actions/checkout@v7
+        with:
+          repository: M4-Scamshield/scam-agent
+          ref: main
+          path: .agent
+      - uses: astral-sh/setup-uv@v10
+      - name: pytest
+        working-directory: .agent
+        run: AGENT_DIR=$PWD uv run --locked pytest ../pipeline/backend/agent-bridge/tests -q
