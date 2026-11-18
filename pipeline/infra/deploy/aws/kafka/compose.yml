@@ -1,5 +1,5 @@
 # scamshield-kafka 서버용. 서버의 ~/deploy 에 두고 실행: docker compose up -d
-# app·worker 가 사설 IP 로 접속한다(SG: 9092 ← app-sg·worker-sg 만). 공인 IP·EIP 불필요.
+# app 이 사설 IP 로 접속한다(SG: 9092 ← app-sg). 공인 IP·EIP 불필요. 같은 서버에 다리도 산다(bridge/, ~/bridge 따로).
 name: scamshield-kafka
 
 services:

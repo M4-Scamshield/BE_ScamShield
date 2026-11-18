@@ -6,8 +6,9 @@ https://boostad.site 를 돌리는 설정. 서버마다 폴더 하나를 그 서
 | 폴더 | 서버 (EC2 t3.small, ap-northeast-2) | 띄우는 것 | 밖에 여는 포트 |
 |---|---|---|---|
 | `app/` | scamshield-app (EIP) | caddy(80·443) · api(파이프라인 8081) · signal(시그널링 8080) · FE 정적 파일 | 80·443 |
-| `kafka/` | scamshield-kafka | Kafka 3.9 KRaft 1대 | 없음 (9092 ← app·worker SG) |
-| `worker/` | scamshield-worker | 다리(agent-bridge 9000) | 없음 (9000 ← app SG) |
+| `kafka/` | scamshield-kafka | Kafka 3.9 KRaft 1대 (`~/deploy`) + 다리 agent-bridge 9000 (`kafka/bridge/` → `~/bridge`) | 없음 (9092·9000 ← app SG) |
+
+서버는 2대. 다리는 원래 worker 서버에 따로 있었는데, 사용량이 적어 운영진 정리 작업에 정해진 시각마다 꺼져서 11-18 kafka 서버로 합쳤다.
 
 DB 는 RDS MySQL 8.4 (퍼블릭 액세스 끔, 3306 ← app SG). 서버끼리는 사설 IP 로 붙는다.
 
@@ -16,10 +17,10 @@ DB 는 RDS MySQL 8.4 (퍼블릭 액세스 끔, 3306 ← app SG). 서버끼리는
 ```bash
 # 각 서버에서
 mkdir -p ~/src ~/deploy && cd ~/src
-git clone https://github.com/M4-Scamshield/BE_ScamShield.git        # app·worker
+git clone https://github.com/M4-Scamshield/BE_ScamShield.git        # app·kafka(다리)
 git clone https://github.com/M4-Scamshield/FE_Scamshield.git        # app (npm ci && npm run build → dist/)
-git clone https://github.com/M4-Scamshield/scam-agent.git           # worker
-# 이 폴더의 app/ (또는 kafka/, worker/) 내용을 ~/deploy 로 복사하고
+git clone https://github.com/M4-Scamshield/scam-agent.git           # kafka(다리)
+# 이 폴더의 app/ (또는 kafka/) 내용을 ~/deploy 로, kafka/bridge/ 는 kafka 서버 ~/bridge 로 복사하고
 cp .env.example .env && chmod 600 .env   # 값은 서버에서 직접 채운다
 docker compose up -d --build
 ```
@@ -28,7 +29,7 @@ docker compose up -d --build
 
 ## 고정값 (서버를 새로 만들면 바꿔야 하는 곳)
 
-- `app/compose.yml`: Kafka `172.31.0.192:9092`, 다리 `http://172.31.15.97:9000/analyze` (사설 IP)
+- `app/compose.yml`: Kafka `172.31.0.192:9092`, 다리 `http://172.31.0.192:9000/analyze` (둘 다 kafka 서버 사설 IP)
 - `kafka/compose.yml`: `KAFKA_HOST` 기본값 = kafka 서버 사설 IP
 - `app/compose.yml` `ALLOWED_ORIGINS`: 도메인 + Discord 확장 ID
 - `app/Caddyfile`: 도메인

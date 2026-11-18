@@ -1,7 +1,7 @@
 # scamshield-app 서버용. 서버의 ~/deploy 에 두고 실행: docker compose up -d --build
 # 코드는 ~/src 아래 팀 레포 clone (BE_ScamShield·FE_Scamshield). 비밀값은 같은 폴더 .env (커밋 안 함).
 # 밖에 여는 건 caddy(80·443) 하나. api·signal 은 ports: 가 없어 caddy 만 닿는다.
-# Kafka·RDS·worker(다리) 는 다른 서버 → 사설 IP 로 붙는다(각 SG 가 app-sg 만 허용).
+# Kafka·다리(같은 kafka 서버)·RDS 는 다른 서버 → 사설 IP 로 붙는다(각 SG 가 app-sg 만 허용).
 name: scamshield-app
 
 services:
@@ -15,7 +15,7 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:?}
       SPRING_KAFKA_BOOTSTRAP_SERVERS: 172.31.0.192:9092
       SCAMSHIELD_AGENT_MODE: http
-      SCAMSHIELD_AGENT_URL: http://172.31.15.97:9000/analyze
+      SCAMSHIELD_AGENT_URL: http://172.31.0.192:9000/analyze   # 다리는 kafka 서버에 같이 산다(11-18, worker 서버에서 옮김)
       STT_MODE: ${STT_MODE:-rtzr}
       RTZR_CLIENT_ID: ${RTZR_CLIENT_ID:-}
       RTZR_CLIENT_SECRET: ${RTZR_CLIENT_SECRET:-}
