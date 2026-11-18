@@ -58,7 +58,7 @@ jobs:
           repository: M4-Scamshield/scam-agent
           ref: main
           path: .agent
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3 (큰 번호 태그가 없어 해시로 고정)
       - name: pytest
         working-directory: .agent
         run: AGENT_DIR=$PWD uv run --locked pytest ../pipeline/backend/agent-bridge/tests -q
