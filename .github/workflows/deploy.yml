@@ -4,6 +4,8 @@
 #   scamshield-kafka : bridge(pipeline/backend/agent-bridge + scam-agent main)
 # 러너는 코드를 따로 받지 않고 서버의 ~/src clone 을 fast-forward 한 뒤 docker compose 로 다시 띄운다.
 # PR 로는 절대 돌지 않는다(공개 레포라 PR 코드가 운영 서버에서 돌면 안 된다).
+#   서버 쪽 문지기도 있다: 러너 job-started hook(~/runner-guard.sh)이 "dev 의 deploy.yml + push/수동 실행"이 아니면 거부.
+# 운영 로그는 공개 Actions 로그에 찍지 않는다(통화 정보가 섞일 수 있음).
 name: Deploy
 
 on:
@@ -72,7 +74,7 @@ jobs:
             esac
             for _ in $(seq 1 60); do check "$url" && { echo "$s OK"; continue 2; }; sleep 3; done
             echo "::error::$s 가 3분 안에 응답하지 않는다. 되돌리기: cd ~/src/BE_ScamShield && git reset --hard ${{ steps.src.outputs.old }} && cd ~/deploy && docker compose up -d --build $s"
-            docker compose logs --tail 80 "$s" | grep -vE 'transcript|text=' || true
+            echo "로그는 공개 레포 Actions 에 남기지 않는다 → 서버에서: cd ~/deploy && docker compose logs --tail 80 $s"
             exit 1
           done
           docker image prune -f >/dev/null
@@ -120,5 +122,5 @@ jobs:
             sleep 3
           done
           echo "::error::다리가 2분 안에 응답하지 않는다. 되돌리기: git -C ~/src/BE_ScamShield reset --hard ${{ steps.src.outputs.old }}; git -C ~/src/scam-agent reset --hard ${{ steps.src.outputs.old_agent }}; cd ~/bridge && docker compose up -d --build bridge"
-          docker compose -f ~/bridge/compose.yml logs --tail 80 bridge || true
+          echo "로그는 공개 레포 Actions 에 남기지 않는다 → 서버에서: cd ~/bridge && docker compose logs --tail 80 bridge"
           exit 1
