@@ -68,17 +68,17 @@ def load(name):
 def test_yes_matches_contract_and_calls_agent_once():
     det, ana = FixedDetector("Yes", 0.87), FixedAnalyst()
     code, body = server.Bridge(CallPipeline(det, ana)).analyze(request(
-        [speech(3, "peer-1", "서울중앙지검입니다"), speech(4, "peer-1", "안전계좌로 옮기세요")],
-        transcript=["[나] 여보세요"]))
+        [speech(3, "p2", "서울중앙지검입니다"), speech(4, "p2", "안전계좌로 옮기세요")],
+        transcript=["[p1] 여보세요"]))
     assert code == 200
     assert body == load("response_yes.json")
     assert len(det.calls) == 1 and ana.calls == 1  # 발화 2개여도 JEV·Gemini 는 한 번
-    assert det.calls[0] == ["[나] 여보세요", "[상대] 서울중앙지검입니다", "[상대] 안전계좌로 옮기세요"]
+    assert det.calls[0] == ["[p1] 여보세요", "[p2] 서울중앙지검입니다", "[p2] 안전계좌로 옮기세요"]
 
 
 def test_no_matches_contract_and_skips_gemini():
     det, ana = FixedDetector("No", 0.12), FixedAnalyst()
-    code, body = server.Bridge(CallPipeline(det, ana)).analyze(request([speech(1, "me", "저녁 뭐 먹을까")]))
+    code, body = server.Bridge(CallPipeline(det, ana)).analyze(request([speech(1, "p1", "저녁 뭐 먹을까")]))
     assert code == 200
     assert body == load("response_no.json")
     assert ana.calls == 0
@@ -87,72 +87,37 @@ def test_no_matches_contract_and_skips_gemini():
 def test_false_positive_matches_contract_and_raises_no_alert():
     """JEV Yes 를 Gemini 가 오탐으로 보면 WARN 도, score 로 인한 SUSPECT(40) 도 나가지 않는다."""
     code, body = server.Bridge(CallPipeline(FixedDetector("Yes", 0.84), FalsePositiveAnalyst())).analyze(
-        request([speech(5, "peer-1", "카드사 이상거래 확인 전화입니다")]))
+        request([speech(5, "p2", "카드사 이상거래 확인 전화입니다")]))
     assert code == 200
     assert body == load("response_false_positive.json")
 
 
 def test_retry_with_same_state_does_not_duplicate_transcript():
     bridge = server.Bridge(CallPipeline(FixedDetector("No", 0.1), FixedAnalyst()))
-    req = request([speech(2, "peer-1", "네")], transcript=["[나] 여보세요"])
+    req = request([speech(2, "p2", "네")], transcript=["[p1] 여보세요"])
     first, second = bridge.analyze(req)[1], bridge.analyze(req)[1]
-    assert first["newState"] == second["newState"] == {"transcript": ["[나] 여보세요", "[상대:peer-1] 네"]}
+    assert first["newState"] == second["newState"] == {"transcript": ["[p1] 여보세요", "[p2] 네"]}
 
 
-class KeywordDetector:
-    """'검찰' 이 들어간 대화만 Yes. 쌍마다 받은 transcript 를 남긴다."""
-
-    def __init__(self):
-        self.calls = []
-
-    def detect(self, transcript):
-        self.calls.append(list(transcript))
-        yes = any("검찰" in line for line in transcript)
-        return {"verdict": "Yes" if yes else "No", "probability": 0.9 if yes else 0.1}
-
-
-GROUP = ["[나] 여보세요", "[상대:peer-0] 검찰입니다", "[상대:peer-1] 밥 먹었어?", "[상대:peer-2] 늦어서 미안"]
-
-
-def test_only_peers_who_spoke_are_judged_with_their_own_lines():
-    det = KeywordDetector()
+def test_whole_room_is_judged_once_with_every_speaker():
+    """4명 방: 누가 말하든 방 전체 대화를 JEV 한 번으로 판단한다."""
+    det = FixedDetector("No", 0.1)
+    room = ["[p1] 여보세요", "[p2] 검찰입니다", "[p3] 밥 먹었어?"]
     code, body = server.Bridge(CallPipeline(det, FixedAnalyst())).analyze(
-        request([speech(5, "peer-1", "응 먹었어")], transcript=GROUP))
+        request([speech(4, "p4", "늦어서 미안"), speech(5, "p1", "괜찮아")], transcript=room))
     assert code == 200
-    assert det.calls == [["[나] 여보세요", "[상대] 밥 먹었어?", "[상대] 응 먹었어"]]  # 나-peer-1 쌍만, 다른 상대 말 없음
-    assert body["action"] == "OBSERVE"  # peer-0 의 '검찰' 이 섞이지 않는다
-    assert body["newState"]["transcript"] == GROUP + ["[상대:peer-1] 응 먹었어"]
+    assert det.calls == [room + ["[p4] 늦어서 미안", "[p1] 괜찮아"]]
 
 
-def test_my_turn_judges_every_pair_and_reports_the_riskiest():
-    det = KeywordDetector()
-    code, body = server.Bridge(CallPipeline(det, FixedAnalyst())).analyze(
-        request([speech(5, "me", "네 말씀하세요")], transcript=GROUP))
-    assert code == 200
-    assert [c[1] for c in det.calls] == ["[상대] 검찰입니다", "[상대] 밥 먹었어?", "[상대] 늦어서 미안"]
-    assert all(c[-1] == "[나] 네 말씀하세요" for c in det.calls)
-    assert body["action"] == "WARN"
-    assert body["reason"] == "[peer-0] 기관 사칭 뒤 안전계좌 송금 요구"
-    assert body["evidenceSeqs"] == [5]
-
-
-def test_evidence_is_only_the_warned_pairs_turns():
-    code, body = server.Bridge(CallPipeline(KeywordDetector(), FixedAnalyst())).analyze(request(
-        [speech(1, "peer-0", "검찰입니다"), speech(2, "peer-1", "안녕"), speech(3, "me", "네")]))
-    assert code == 200
-    assert body["reason"].startswith("[peer-0] ")
-    assert body["evidenceSeqs"] == [1, 3]
-
-
-def test_untagged_old_peer_line_goes_to_every_pair():
-    det = KeywordDetector()
-    server.Bridge(CallPipeline(det, FixedAnalyst())).analyze(
-        request([speech(3, "peer-1", "네")], transcript=["[상대] 검찰입니다"]))
-    assert det.calls == [["[상대] 검찰입니다", "[상대] 네"]]
+def test_user_input_is_labeled():
+    det = FixedDetector("No", 0.1)
+    server.Bridge(CallPipeline(det, FixedAnalyst())).analyze(request(
+        [{"seq": 1, "kind": "INPUT", "trackId": "USER", "text": "http://x.invalid/a.apk", "inputType": "LINK"}]))
+    assert det.calls == [["[사용자 입력 LINK] http://x.invalid/a.apk"]]
 
 
 def test_agent_error_is_502():
-    code, body = server.Bridge(CallPipeline(FailingDetector(), FixedAnalyst())).analyze(request([speech(1, "me", "여보세요")]))
+    code, body = server.Bridge(CallPipeline(FailingDetector(), FixedAnalyst())).analyze(request([speech(1, "p1", "여보세요")]))
     assert code == 502
     assert body["error"]["stage"] == "jev"
 

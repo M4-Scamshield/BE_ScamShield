@@ -48,7 +48,7 @@ abstract class PipelineTestSupport {
     }
 
     private static final List<String> TABLES = List.of("outbox", "agent_action", "alert", "analyzed_segment",
-            "analysis_result", "analysis_job", "user_input", "utterance", "agent_state", "call_state", "call_session");
+            "analysis_result", "analysis_job", "user_input", "utterance", "agent_state", "call_state", "call_session", "call_token");
 
     @Autowired JdbcTemplate db;
     @Autowired TransactionTemplate tx;
