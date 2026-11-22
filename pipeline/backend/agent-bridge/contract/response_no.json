@@ -5,8 +5,7 @@
   "reason": null,
   "evidenceSeqs": [],
   "newState": {
-    "transcript": [
-      "[p1] 저녁 뭐 먹을까"
-    ]
+    "transcript": ["[p1] 저녁 뭐 먹을까"],
+    "agent": {"handled": {}, "call_context": {"purpose": "", "claimed_identity": ""}, "seen": [], "held": {}}
   }
 }
