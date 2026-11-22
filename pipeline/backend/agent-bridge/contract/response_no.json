@@ -4,5 +4,8 @@
   "message": null,
   "reason": null,
   "evidenceSeqs": [],
-  "newState": {"transcript": ["[나] 저녁 뭐 먹을까"]}
+  "newState": {
+    "transcript": ["[나] 저녁 뭐 먹을까"],
+    "peers": {"": {"handled": {}, "call_context": {"purpose": "", "claimed_identity": ""}, "seen": [], "held": {}}}
+  }
 }

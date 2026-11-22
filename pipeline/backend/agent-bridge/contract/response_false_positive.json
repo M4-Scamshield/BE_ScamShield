@@ -4,5 +4,16 @@
   "message": null,
   "reason": "[peer-1] 카드사 본인 확인 절차이며 송금·인증번호 요구가 없다",
   "evidenceSeqs": [],
-  "newState": {"transcript": ["[상대:peer-1] 카드사 이상거래 확인 전화입니다"]}
+  "newState": {
+    "transcript": ["[상대:peer-1] 카드사 이상거래 확인 전화입니다"],
+    "peers": {
+      "peer-1": {
+        "handled": {"F2": {"judgment": "uncertain", "reason": "카드사 본인 확인 절차이며 송금·인증번호 요구가 없다",
+                           "response": "", "actions": [], "evidence_seqs": [5], "judged_at": 1795000000.0}},
+        "call_context": {"purpose": "이상거래 확인", "claimed_identity": "카드사"},
+        "seen": ["F2"],
+        "held": {}
+      }
+    }
+  }
 }
