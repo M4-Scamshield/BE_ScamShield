@@ -5,7 +5,7 @@
   "reason": null,
   "evidenceSeqs": [],
   "newState": {
-    "transcript": ["[나] 저녁 뭐 먹을까"],
-    "peers": {"": {"handled": {}, "call_context": {"purpose": "", "claimed_identity": ""}, "seen": [], "held": {}}}
+    "transcript": ["[p1] 저녁 뭐 먹을까"],
+    "agent": {"handled": {}, "call_context": {"purpose": "", "claimed_identity": ""}, "seen": [], "held": {}}
   }
 }

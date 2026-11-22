@@ -2,19 +2,17 @@
   "score": 87,
   "action": "WARN",
   "message": "송금을 멈추고 기관 대표번호로 확인하세요.",
-  "reason": "[peer-1] 기관 사칭 뒤 안전계좌 송금 요구",
+  "reason": "기관 사칭 뒤 안전계좌 송금 요구",
   "evidenceSeqs": [3, 4],
   "newState": {
-    "transcript": ["[나] 여보세요", "[상대:peer-1] 서울중앙지검입니다", "[상대:peer-1] 안전계좌로 옮기세요"],
-    "peers": {
-      "peer-1": {
-        "handled": {"F1": {"judgment": "risky", "reason": "기관 사칭 뒤 안전계좌 송금 요구",
-                           "response": "송금을 멈추고 기관 대표번호로 확인하세요.", "actions": [],
-                           "evidence_seqs": [3, 4], "judged_at": 1795000000.0}},
-        "call_context": {"purpose": "수사 협조", "claimed_identity": "서울중앙지검"},
-        "seen": ["F1"],
-        "held": {}
-      }
+    "transcript": ["[p1] 여보세요", "[p2] 서울중앙지검입니다", "[p2] 안전계좌로 옮기세요"],
+    "agent": {
+      "handled": {"F1": {"judgment": "risky", "reason": "기관 사칭 뒤 안전계좌 송금 요구",
+                         "response": "송금을 멈추고 기관 대표번호로 확인하세요.", "actions": [],
+                         "evidence_seqs": [3, 4], "judged_at": 1795000000.0}},
+      "call_context": {"purpose": "수사 협조", "claimed_identity": "서울중앙지검"},
+      "seen": ["F1"],
+      "held": {}
     }
   }
 }
