@@ -1,0 +1,23 @@
+# AI 다리(bridge)를 kafka 서버에 같이 올린다 (11-18 이전: 원래 worker 서버 172.31.15.97 에 있었다).
+# 옮긴 이유: worker 는 사용량이 적어 운영진 정리 작업에 정해진 시각마다 꺼졌고(StateReason UserInitiatedShutdown),
+#           kafka 는 3일 넘게 안 꺼짐. 인스턴스를 하나 줄여 다리가 늘 떠 있게 한다.
+# 서버의 ~/bridge 에 두고 실행: docker compose up -d --build   (Kafka 는 ~/deploy 따로, 서로 영향 없음)
+# 코드는 ~/src 아래 팀 레포 clone (BE_ScamShield = 다리 코드, scam-agent = AI 코드. agent 는 고치지 않는다).
+# 비밀값(TYPESAFE·Gemini) 은 같은 폴더 .env (커밋 안 함, 600). 형식은 같은 폴더 .env.example.
+name: scamshield-bridge
+
+services:
+  bridge:
+    build:
+      context: ../src/BE_ScamShield/pipeline/backend/agent-bridge
+      additional_contexts:
+        agent: ../src/scam-agent
+    restart: unless-stopped
+    # app 이 사설 IP 172.31.0.192:9000 으로 부른다. 밖에서는 kafka SG(9000 ← app-sg 만) 가 막는다
+    ports:
+      - "9000:9000"
+    env_file: .env
+    environment:
+      GEMINI_TIMEOUT_SECONDS: ${GEMINI_TIMEOUT_SECONDS:-20}   # JEV 30 + 이 값 < app 의 agent.timeout-ms(55초)
+    # Kafka(-Xmx512m, 실측 630MB) 와 2GB 를 나눠 쓴다. 다리가 새도 Kafka 를 죽이지 않게 상한을 둔다
+    mem_limit: 600m
