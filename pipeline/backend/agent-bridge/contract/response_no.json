@@ -4,5 +4,9 @@
   "message": null,
   "reason": null,
   "evidenceSeqs": [],
-  "newState": {"transcript": ["[나] 저녁 뭐 먹을까"]}
+  "newState": {
+    "transcript": [
+      "[p1] 저녁 뭐 먹을까"
+    ]
+  }
 }
