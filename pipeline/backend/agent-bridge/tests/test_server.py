@@ -220,3 +220,20 @@ def test_empty_turns_is_400():
     pipe = FakePipeline()
     assert server.Bridge(pipe).analyze({"callId": "c1", "turns": []})[0] == 400
     assert pipe.calls == []
+
+
+def test_real_offline_agent_state_round_trips_through_json():
+    """대역 대신 agent 의 오프라인 파이프라인으로 두 요청을 잇는다. agent state 형식이 바뀌면 여기서 깨진다."""
+    from scamshield.graph import build_pipeline
+
+    bridge = server.Bridge(build_pipeline(offline=True))
+    code, first = bridge.analyze(request([speech(1, "peer-1", "서울중앙지검 수사관입니다. 계좌가 연루됐습니다.")]))
+    assert code == 200
+    state = json.loads(json.dumps(first["newState"]))
+    code, second = bridge.analyze(request([speech(2, "peer-1", "지금 안전계좌로 송금하세요.")], **state))
+    assert code == 200
+    assert second["action"] == "WARN" and second["score"] > 39
+    assert 2 in second["evidenceSeqs"]
+    assert set(second["newState"]["peers"]) == {"peer-1"}
+    assert second["newState"]["peers"]["peer-1"]["handled"]["F1"]["judgment"] == "risky"
+    json.dumps(second)

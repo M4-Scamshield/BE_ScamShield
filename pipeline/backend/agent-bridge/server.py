@@ -182,7 +182,7 @@ def main():
     try:
         pipeline = build_pipeline(offline=a.offline)
     except PipelineError as exc:  # 키 값은 찍지 않는다
-        sys.exit(f"agent 설정 오류: {exc.code} (키 없이 시험하려면 --offline)")
+        sys.exit(f"agent 설정 오류: {exc.message} (키 없이 시험하려면 --offline)")
     bridge = Bridge(pipeline)
     server = ThreadingHTTPServer((a.host, a.port), make_handler(bridge))
     mode = "offline" if a.offline else "jev+haiku"
