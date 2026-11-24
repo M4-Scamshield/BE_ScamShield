@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 import scamshield.pipeline.analysis.AnalysisResponse;
 import scamshield.pipeline.analysis.Lease;
 
-/** 실험 뒤에 생긴 규칙 — Agent 상태 CAS, 행동(ACQUIRE/VERIFY) 발행, 같은 안내 반복 억제, eventSeq 순번. */
+/** 실험 뒤에 생긴 규칙 — Agent 상태 CAS, 행동(ACQUIRE/VERIFY) 발행, 같은 안내 반복 억제, eventSeq 순번, WARN 안 점수 상승. */
 class AgentStateTest extends PipelineTestSupport {
 
     static final String CALL = "C4";
@@ -71,5 +71,47 @@ class AgentStateTest extends PipelineTestSupport {
         assertEquals(2, count("select alert_level from call_state where call_id = ?", CALL), "경고 단계는 내려가지 않는다");
         assertEquals(3, count("select count(*) from outbox where event_type in ('alert','action')"), "새 경고·행동은 없다");
         assertEquals(6, count("select count(*) from outbox"), "전사(3) + 경고·행동(3)");
+    }
+
+    @Test
+    @DisplayName("이미 WARN 인 통화에서 점수가 최고점보다 오르면 warning 으로 다시 알린다 — 같거나 낮으면 안 낸다")
+    void warnScoreRiseIsAnnouncedAgain() {
+        accept(CALL, 1, "검찰 수사관입니다");
+        apply(lease(), warn(10, "기관 사칭 안내"));     // 첫 위험 → alert
+        accept(CALL, 2, "사건에 연루되셨어요");
+        apply(lease(), warn(10, "기관 사칭 안내"));     // 점수 그대로 → 없음
+        accept(CALL, 3, "안전계좌로 옮기셔야 합니다");
+        apply(lease(), warn(50, "송금 요구 안내"));     // 새 위험 상태 → warning
+        accept(CALL, 4, "네");
+        apply(lease(), new AnalysisResponse(39, AnalysisResponse.OBSERVE, null, null, java.util.List.of(), null));
+        accept(CALL, 5, "지금 바로요");
+        apply(lease(), warn(50, "송금 요구 안내"));     // 최고점과 같음 → 없음
+
+        assertEquals(java.util.List.of("alert", "warning"),
+                db.queryForList("select event_type from outbox where call_id = ? and event_type <> 'utterance' order by event_seq",
+                        String.class, CALL));
+        var payload = json.readTree(db.queryForObject(
+                "select cast(payload as char) from outbox where event_type = 'warning'", String.class));
+        assertEquals(50, payload.get("score").asInt());
+        assertEquals("WARN", payload.get("level").asString());
+        assertEquals("송금 요구 안내", payload.get("message").asString());
+        assertEquals(1, count("select count(*) from alert"), "단계는 그대로라 alert 표에는 하나만");
+        assertEquals(count("select max(event_seq) from outbox where call_id = ?", CALL),
+                count("select last_event_seq from call_state where call_id = ?", CALL), "eventSeq 빈틈 없음");
+    }
+
+    @Test
+    @DisplayName("WARN 이 아닌 결과는 점수가 높아도 warning 을 내지 않는다")
+    void nonWarnResultDoesNotAnnounce() {
+        accept(CALL, 1, "검찰 수사관입니다");
+        apply(lease(), warn(10, "기관 사칭 안내"));
+        accept(CALL, 2, "네");
+        apply(lease(), new AnalysisResponse(60, AnalysisResponse.ACQUIRE, "어떤 기관이라고 했나요?", null, java.util.List.of(), null));
+
+        assertEquals(0, count("select count(*) from outbox where event_type = 'warning'"));
+    }
+
+    private static AnalysisResponse warn(int score, String message) {
+        return new AnalysisResponse(score, AnalysisResponse.WARN, message, "근거", java.util.List.of(), null);
     }
 }

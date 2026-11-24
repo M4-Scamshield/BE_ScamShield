@@ -85,6 +85,8 @@ scamshield:
   sse:
     heartbeat-seconds: 15
     timeout-minutes: 30          # 이후 닫히고 EventSource 가 Last-Event-ID 로 다시 붙는다
-    max-per-call: 3              # 통화당 SSE 연결. 넘으면 가장 오래된 연결을 닫는다
+    # 통화당 SSE 연결. 넘으면 가장 오래된 연결을 닫는다. 방 참가자(최대 4)가 모두 같은 통화를 구독하므로
+    # 정원보다 넉넉히(탭 두 개·재연결 겹침). 3 이면 4명째가 붙을 때마다 서로 끊어 "재연결 중"이 번갈아 뜬다
+    max-per-call: 8
     max-total: 500               # 이 인스턴스 전체
     relay-interval-ms: 100

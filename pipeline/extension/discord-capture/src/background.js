@@ -6,7 +6,7 @@
  *   WS   {server}/ws/audio?callId&token&trackId&epoch        ← PCM16 mono 16kHz, 100ms(3200바이트) 조각
  *   trackId: 내 마이크 "me", 상대 "peer-<mid>". 연결 = 화자. 다시 붙을 때 epoch 를 올린다.
  *
- *   GET  {server}/api/analysis/calls/{callId}/events (Bearer) → SSE alert | action  (경고를 팝업·Discord 화면에 띄운다)
+ *   GET  {server}/api/analysis/calls/{callId}/events (Bearer) → SSE alert | warning | action  (경고를 팝업·Discord 화면에 띄운다)
  *
  * 한 번도 소리가 안 난 트랙은 연결을 열지 않는다 (서버 STT 자리·화자 상한 4개를 아끼려고).
  * 4개가 다 찼는데 새 화자가 말하면, 오래(releaseSilentMs) 조용한 트랙의 연결을 닫고 자리를 넘긴다.
@@ -298,15 +298,17 @@ function onSseBlock(s, block) {
   } catch {
     return;
   }
-  if (type !== "alert" && type !== "action") return;
+  // warning = 이미 WARN 인 통화에서 새 위험이 잡혀 점수·안내가 바뀐 것. 화면에서는 경고와 같게 다룬다
+  const kind = type === "warning" ? "alert" : type;
+  if (kind !== "alert" && kind !== "action") return;
   const a = {
-    id, type, at: Date.now(),
+    id, type: kind, at: Date.now(),
     level: p.level ?? null, score: p.score ?? null, action: p.action ?? null,
     message: p.message ?? "", reason: p.reason ?? "",
   };
   s.alerts.push(a);
   if (s.alerts.length > MAX_ALERTS) s.alerts.shift();
-  if (type === "alert") {
+  if (kind === "alert") {
     const warn = a.level === "WARN";
     chrome.action.setBadgeText({ text: "!", tabId: s.tabId }).catch(() => {});
     chrome.action.setBadgeBackgroundColor({ color: warn ? "#DC2626" : "#B45309" }).catch(() => {});

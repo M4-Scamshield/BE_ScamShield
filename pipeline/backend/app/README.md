@@ -21,7 +21,7 @@ Flyway가 시작할 때 `V1__pipeline.sql`, `V2__call_session.sql`을 적용한�
 ## 손으로 확인
 
 통화마다 `POST /api/analysis/calls`로 callId·토큰을 받는다. 이후 요청은 `Authorization: Bearer <토큰>`
-(EventSource·WebSocket 은 `?token=`). 토큰이 틀리면 401. SSE 는 통화당 3개를 넘으면 가장 오래된 연결을 닫고, 인스턴스 전체 상한(500)을 넘으면 429.
+(EventSource·WebSocket 은 `?token=`). 토큰이 틀리면 401. SSE 는 통화당 8개를 넘으면 가장 오래된 연결을 닫고, 인스턴스 전체 상한(500)을 넘으면 429.
 
 ```bash
 read C T < <(curl -s -XPOST localhost:8081/api/analysis/calls | python3 -c "import json,sys;d=json.load(sys.stdin);print(d['callId'],d['token'])")
@@ -50,7 +50,7 @@ DOCKER_HOST=unix://$HOME/.colima/default/docker.sock TESTCONTAINERS_DOCKER_SOCKE
 | `CoverageTest` | 분석 중 들어온 발화가 빠지지 않는가, 구멍에서 analyzedTo 가 멈추는가, FAILED·SUPERSEDED 구간을 다음 작업이 덮는가 |
 | `CrashRecoveryTest` | 접수 커밋 전·후, 임대 뒤, AI 호출 뒤, 채택 뒤에 죽어도 수렴하는가. 좀비 토큰 거절, 재전송과 중복 생성 구분 |
 | `WindowTest` | 한 번에 보내는 구간이 언제 수렴하고 언제 발산하는가 |
-| `AgentStateTest` | 상태 CAS, 같은 안내 반복 억제, 경고·행동 eventSeq 순번 |
+| `AgentStateTest` | 상태 CAS, 같은 안내 반복 억제, 경고·행동 eventSeq 순번, WARN 안 점수 상승 → warning |
 
 실행기·릴레이는 끄고(`scamshield.roles=none`) 단계를 직접 부른다. lease 만료는 기다리지 않고 `lease_until` 을 과거로 돌린다.
 
@@ -78,7 +78,7 @@ python3 sql/load.py run1 30 5          # 30통화 × 화자 2 × 5발화 (DEV_EN
 | `stt.max-sessions-per-ip` | 4 | IP 하나의 동시 STT 세션(넘으면 1008). `STT_MAX_SESSIONS_PER_IP` |
 | `stt.max-tracks-per-call` / `idle-seconds` | 4 / 30 | 통화당 화자 수(넘으면 1008, 같은 trackId 는 교체) / 음성이 안 오면 닫는 시간 |
 | `access.create-per-minute` | 10 | IP 당 분당 통화 생성 수. 넘으면 429 |
-| `sse.max-per-call` / `max-total` / `timeout-minutes` | 3 / 500 / 30 | SSE 연결 상한·수명 |
+| `sse.max-per-call` / `max-total` / `timeout-minutes` | 8 / 500 / 30 | SSE 연결 상한·수명 |
 | `web.allowed-origins` | localhost + Discord 확장 | 업로드 WS 허용 Origin. `ALLOWED_ORIGINS` 로 덮어쓴다. 확장은 `chrome-extension://opdocepfbahoocfkahckhnbhdedkibim` |
 | `dev.enabled` | false | 토큰 없는 개발용 입구. `DEV_ENDPOINTS=true` |
 
