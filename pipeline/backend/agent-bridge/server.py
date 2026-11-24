@@ -14,6 +14,10 @@
   status 위험 → action WARN, 주의·정상 → OBSERVE
   score: 위험이면 그대로, 아니면 39 이하로 낮춘다(ResultApplier 가 40 이상을 SUSPECT 로 알리므로 위험일 때만 알림)
   message (사용자 안내)·reason (근거)·evidence_seqs → evidenceSeqs 는 agent 출력 그대로
+    (agent 는 message·reason 을 가장 앞선 위험 상태 하나에서만 고른다 → 새 수법이 잡혀도 안 바뀔 수 있다)
+  findings: 위험(risky)으로 판정된 수법 하나하나 = agent 상태 handled 를 형식만 바꾼 것. 먼저 잡힌 순서.
+    {code, name, points, reason, message, evidenceSeqs}. 화면은 이걸로 수법별 근거를 따로 보여 준다.
+    evidenceSeqs 는 agent 가 붙인 그대로(그 상태가 Yes 로 잡힌 묶음의 줄 전부, 화자 구분 없음)
 
 대기 시간: Jev 10초 + Haiku 최대 2×12초(tool 왕복 1번, 상태끼리는 동시) ≈ 34초.
   파이프라인 쪽 agent.timeout-ms(55초)와 executor.lease-seconds 는 이보다 길어야 한다(application.yml).
@@ -36,6 +40,7 @@ sys.path.insert(0, str(AGENT_DIR))
 
 from scamshield.graph import CallPipeline, build_pipeline  # noqa: E402
 from scamshield.state import NewLine, PipelineError  # noqa: E402
+from scamshield.tactics import POINTS, PRIORITY, STATES  # noqa: E402
 
 
 def turn_text(t: dict) -> str:
@@ -49,6 +54,22 @@ def turn_text(t: dict) -> str:
 NOT_DANGER_MAX_SCORE = 39
 
 
+def findings(agent_state: dict | None) -> list[dict]:
+    """위험으로 판정된 수법 목록. 먼저 판정된 것부터(같은 시각이면 agent 의 우선순위)."""
+    handled = (agent_state or {}).get("handled") or {}
+    risky = [(code, h) for code, h in handled.items() if h.get("judgment") == "risky"]
+    order = {code: i for i, code in enumerate(PRIORITY)}
+    risky.sort(key=lambda kv: (kv[1].get("judged_at") or 0, order.get(kv[0], len(order))))
+    return [{
+        "code": code,
+        "name": STATES[code][0] if code in STATES else code,
+        "points": POINTS[code][0] if code in POINTS else 0,
+        "reason": h.get("reason") or None,
+        "message": h.get("response") or None,
+        "evidenceSeqs": sorted(h.get("evidence_seqs") or []),
+    } for code, h in risky]
+
+
 def to_response(outcome) -> dict:
     """agent 결과 → 계약 ② 응답. newState 는 호출한 쪽이 채운다."""
     warn = outcome.status == "위험"
@@ -58,6 +79,7 @@ def to_response(outcome) -> dict:
         "message": outcome.message,
         "reason": outcome.reason,
         "evidenceSeqs": list(outcome.evidence_seqs),
+        "findings": findings(outcome.state),
     }
 
 

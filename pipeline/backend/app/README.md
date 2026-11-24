@@ -50,7 +50,8 @@ DOCKER_HOST=unix://$HOME/.colima/default/docker.sock TESTCONTAINERS_DOCKER_SOCKE
 | `CoverageTest` | 분석 중 들어온 발화가 빠지지 않는가, 구멍에서 analyzedTo 가 멈추는가, FAILED·SUPERSEDED 구간을 다음 작업이 덮는가 |
 | `CrashRecoveryTest` | 접수 커밋 전·후, 임대 뒤, AI 호출 뒤, 채택 뒤에 죽어도 수렴하는가. 좀비 토큰 거절, 재전송과 중복 생성 구분 |
 | `WindowTest` | 한 번에 보내는 구간이 언제 수렴하고 언제 발산하는가 |
-| `AgentStateTest` | 상태 CAS, 같은 안내 반복 억제, 경고·행동 eventSeq 순번, WARN 안 점수 상승 → warning |
+| `AgentStateTest` | 상태 CAS, 같은 안내 반복 억제, 경고·행동 eventSeq 순번, WARN 안 점수 상승·새 수법 → warning |
+| `AgentContractTest` | 다리 응답 예시(contract/*.json)를 그대로 읽는가, 근거·수법별 목록(findings)이 경고에 실리는가 |
 
 실행기·릴레이는 끄고(`scamshield.roles=none`) 단계를 직접 부른다. lease 만료는 기다리지 않고 `lease_until` 을 과거로 돌린다.
 
