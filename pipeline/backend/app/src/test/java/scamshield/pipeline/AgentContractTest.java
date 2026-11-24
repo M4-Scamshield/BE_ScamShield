@@ -32,11 +32,18 @@ class AgentContractTest extends PipelineTestSupport {
     @DisplayName("의심(Yes) 응답: WARN·점수·안내·근거·증거·상태를 읽는다")
     void yes() throws Exception {
         AnalysisResponse r = read("response_yes.json");
-        assertEquals(87, r.score());
+        assertEquals(50, r.score());
         assertEquals(AnalysisResponse.WARN, r.action());
         assertNotNull(r.message());
         assertNotNull(r.reason());
-        assertEquals(List.of(3L, 4L), r.evidenceSeqs());
+        assertEquals(List.of(2L, 3L, 4L), r.evidenceSeqs());
+        assertEquals(List.of("F6", "F1"), r.findings().stream().map(AnalysisResponse.Finding::code).toList(),
+                "수법은 먼저 잡힌 순서");
+        AnalysisResponse.Finding f1 = r.findings().get(1);
+        assertEquals("자산 넘기기", f1.name());
+        assertEquals(40, f1.points());
+        assertEquals(r.reason(), f1.reason());
+        assertEquals(List.of(3L, 4L), f1.evidenceSeqs());
         assertEquals(3, r.newState().get("transcript").size());
     }
 
@@ -48,6 +55,7 @@ class AgentContractTest extends PipelineTestSupport {
         assertNull(r.message());
         assertNull(r.reason());
         assertTrue(r.evidenceSeqs().isEmpty());
+        assertTrue(r.findings().isEmpty());
     }
 
     @Test
@@ -66,17 +74,21 @@ class AgentContractTest extends PipelineTestSupport {
     }
 
     @Test
-    @DisplayName("근거(reason)는 결과에 저장되고 경고 이벤트(SSE)에 실린다")
+    @DisplayName("근거(reason)는 결과에 저장되고, 근거와 수법별 목록이 경고 이벤트(SSE)에 실린다")
     void reasonReachesAlert() throws Exception {
         accept(CALL, 1, "서울중앙지검입니다");
         Lease l = lease();
         AnalysisResponse yes = read("response_yes.json");
-        apply(l, new AnalysisResponse(yes.score(), yes.action(), yes.message(), yes.reason(), List.of(1L), null));
+        apply(l, new AnalysisResponse(yes.score(), yes.action(), yes.message(), yes.reason(), List.of(1L),
+                yes.findings(), null));
 
         assertEquals(yes.reason(), db.queryForObject("select reason from analysis_result", String.class));
         JsonNode alert = json.readTree(db.queryForObject(
                 "select payload from outbox where event_type = 'alert'", String.class));
         assertEquals("WARN", alert.get("level").asString());
         assertEquals(yes.reason(), alert.get("reason").asString());
+        assertEquals(2, alert.get("findings").size(), "수법별 목록도 경고에 실린다");
+        assertEquals("F6", alert.get("findings").get(0).get("code").asString());
+        assertEquals("서울중앙지검이라며 수사기관을 내세움", alert.get("findings").get(0).get("reason").asString());
     }
 }

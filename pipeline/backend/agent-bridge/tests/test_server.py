@@ -76,7 +76,7 @@ def typed(seq, input_type, text):
 
 def test_danger_matches_contract_and_calls_agent_once_with_all_new_lines():
     want = load("response_yes.json")
-    pipe = fixed(Outcome("위험", 87, "송금을 멈추고 기관 대표번호로 확인하세요.", "기관 사칭 뒤 안전계좌 송금 요구", [3, 4],
+    pipe = fixed(Outcome("위험", 50, "송금을 멈추고 기관 대표번호로 확인하세요.", "기관 사칭 뒤 안전계좌 송금 요구", [2, 3, 4],
                          state=want["newState"]["agent"]))
     code, body = server.Bridge(pipe).analyze(request(
         [speech(3, "p2", "서울중앙지검입니다"), speech(4, "p2", "안전계좌로 옮기세요")], transcript=["[p1] 여보세요"]))
@@ -121,6 +121,39 @@ def test_message_reason_evidence_pass_through():
     out = Outcome("위험", 70, "끊으세요", "F1: 송금 요구", [2, 9])
     body = server.Bridge(fixed(out)).analyze(request([speech(9, "p2", "보내세요")]))[1]
     assert (body["message"], body["reason"], body["evidenceSeqs"]) == ("끊으세요", "F1: 송금 요구", [2, 9])
+
+
+def handled(judgment, at, seqs, reason="r", response="m"):
+    return {"judgment": judgment, "reason": reason, "response": response, "actions": [],
+            "evidence_seqs": seqs, "judged_at": at}
+
+
+def test_findings_list_each_risky_tactic_in_detection_order():
+    """agent 는 reason·message 를 우선순위 첫 위험 상태(F1)에서만 고른다. findings 는 위험 상태를 하나하나,
+    먼저 잡힌 순서로 낸다. 주의·정상 상태는 빠진다. 같은 시각이면 agent 우선순위(F1, F3, F2 …)."""
+    state = {"handled": {
+        "F1": handled("risky", 30.0, [9, 7], "송금 요구", "보내지 마세요"),
+        "F3": handled("risky", 10.0, [3], "메신저로 이동", "링크 누르지 마세요"),
+        "F6": handled("risky", 10.0, [2], "기관 사칭", ""),
+        "F2": handled("uncertain", 20.0, [5]),
+        "F4": handled("within_normal", 20.0, [6]),
+    }}
+    body = server.Bridge(fixed(Outcome("위험", 90, "보내지 마세요", "송금 요구", [2, 3, 7, 9], state=state))).analyze(
+        request([speech(9, "p2", "보내세요")]))[1]
+    assert body["findings"] == [
+        {"code": "F3", "name": "통화 밖 이동", "points": 40, "reason": "메신저로 이동", "message": "링크 누르지 마세요",
+         "evidenceSeqs": [3]},
+        {"code": "F6", "name": "권위·절차 연출", "points": 10, "reason": "기관 사칭", "message": None,
+         "evidenceSeqs": [2]},
+        {"code": "F1", "name": "자산 넘기기", "points": 40, "reason": "송금 요구", "message": "보내지 마세요",
+         "evidenceSeqs": [7, 9]},
+    ]
+
+
+def test_no_risky_tactic_means_no_findings():
+    state = {"handled": {"F2": handled("uncertain", 1.0, [1])}}
+    body = server.Bridge(fixed(Outcome("주의", 20, state=state))).analyze(request([speech(1, "p1", "네")]))[1]
+    assert body["findings"] == []
 
 
 def test_retry_with_same_state_gives_same_new_state():
@@ -184,4 +217,6 @@ def test_real_offline_agent_state_round_trips_through_json():
     assert second["action"] == "WARN" and second["score"] > 39
     assert 2 in second["evidenceSeqs"]
     assert second["newState"]["agent"]["handled"]["F1"]["judgment"] == "risky"
+    assert "F1" in [f["code"] for f in second["findings"]]
+    assert all(f["reason"] and f["evidenceSeqs"] for f in second["findings"])
     json.dumps(second)

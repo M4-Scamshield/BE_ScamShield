@@ -1,6 +1,7 @@
 package scamshield.pipeline.result;
 
 import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -8,6 +9,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -24,8 +27,9 @@ import scamshield.pipeline.analysis.Lease;
  *  2) 현재 점수: 이 결과가 덮은 끝(to)이 지금 점수의 끝보다 뒤일 때만 바꾼다 (더 넓게 본 쪽이 이긴다)
  *  3) 구간 기록 → analyzedTo = 빈틈없이 이어진 끝
  *  4) 경고: 이력 기준. 늦게 와도 올린다 (한 번 위험은 위험). 단계는 내려가지 않는다
- *     이미 WARN 인데 WARN 결과의 점수가 지금까지 최고점보다 높으면 warning 으로 다시 알린다
- *     (새 위험 상태가 잡혀 점수·안내·근거가 바뀐 것. 단계는 그대로라 alert 표에는 남기지 않는다)
+ *     이미 WARN 인데 WARN 결과의 점수가 지금까지 최고점보다 높거나, 직전에 알린 경고에 없던 수법이 잡히면
+ *     warning 으로 다시 알린다 (점수가 100 에 닿았거나 '주의' 몫이 줄어 점수가 안 올라도 새 수법은 알린다.
+ *     단계는 그대로라 alert 표에는 남기지 않는다). 경고 payload 에는 수법별 목록(findings)이 실린다
  *  5) Agent 상태: state_version CAS. 성공했을 때만 newState 적용 + ACQUIRE/VERIFY 행동 발행
  *     (직전 행동과 action·message 가 같으면 발행하지 않는다)
  */
@@ -98,13 +102,16 @@ public class ResultApplier {
                     l.callId(), eventSeq, resultId, level, res.score(), write(evidence));
             outbox(l.callId(), eventSeq, "alert", payload(
                     "eventSeq", eventSeq, "level", level == 2 ? "WARN" : "SUSPECT", "score", res.score(),
-                    "message", res.message(), "reason", res.reason(), "evidenceSeqs", evidence, "coveredTo", l.coveredTo()));
+                    "message", res.message(), "reason", res.reason(), "evidenceSeqs", evidence,
+                    "findings", res.findings(), "coveredTo", l.coveredTo()));
             db.update("update call_state set alert_level = ? where call_id = ?", level, l.callId());
-        } else if (alertLevel == 2 && AnalysisResponse.WARN.equals(res.action()) && res.score() > peak) {
+        } else if (alertLevel == 2 && AnalysisResponse.WARN.equals(res.action())
+                && (res.score() > peak || hasNewFinding(l.callId(), res))) {
             eventSeq++;
             outbox(l.callId(), eventSeq, "warning", payload(
                     "eventSeq", eventSeq, "level", "WARN", "score", res.score(),
-                    "message", res.message(), "reason", res.reason(), "evidenceSeqs", evidence, "coveredTo", l.coveredTo()));
+                    "message", res.message(), "reason", res.reason(), "evidenceSeqs", evidence,
+                    "findings", res.findings(), "coveredTo", l.coveredTo()));
         }
 
         boolean visible = AnalysisResponse.ACQUIRE.equals(res.action()) || AnalysisResponse.VERIFY.equals(res.action());
@@ -120,6 +127,22 @@ public class ResultApplier {
         db.update("""
                 update analysis_job set state = 'DONE', done_at = now(6), lease_until = null
                 where job_id = ?""", l.jobId());
+    }
+
+    /** 직전에 알린 경고(alert·warning)의 수법 목록에 없는 수법이 이번 결과에 있는가. */
+    private boolean hasNewFinding(String callId, AnalysisResponse res) {
+        if (res.findings().isEmpty()) return false;
+        List<String> last = db.queryForList("""
+                select cast(payload as char) from outbox
+                where call_id = ? and event_type in ('alert', 'warning') order by event_seq desc limit 1""",
+                String.class, callId);
+        Set<String> told = last.isEmpty() ? Set.of() : codes(last.get(0));
+        return res.findings().stream().anyMatch(f -> !told.contains(f.code()));
+    }
+
+    private Set<String> codes(String payload) {
+        JsonNode findings = json.readTree(payload).path("findings");
+        return findings.valueStream().map(f -> f.path("code").asString()).collect(Collectors.toSet());
     }
 
     /** Agent 가 같은 판단을 되풀이해도 화면에는 한 번만. 결과는 analysis_result 에 그대로 남는다. */

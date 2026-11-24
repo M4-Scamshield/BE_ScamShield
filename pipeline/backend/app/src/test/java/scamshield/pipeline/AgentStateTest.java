@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 import scamshield.pipeline.analysis.AnalysisResponse;
 import scamshield.pipeline.analysis.Lease;
 
-/** 실험 뒤에 생긴 규칙 — Agent 상태 CAS, 행동(ACQUIRE/VERIFY) 발행, 같은 안내 반복 억제, eventSeq 순번, WARN 안 점수 상승. */
+/** 실험 뒤에 생긴 규칙 — Agent 상태 CAS, 행동(ACQUIRE/VERIFY) 발행, 같은 안내 반복 억제, eventSeq 순번, WARN 안 점수 상승·새 수법. */
 class AgentStateTest extends PipelineTestSupport {
 
     static final String CALL = "C4";
@@ -111,7 +111,37 @@ class AgentStateTest extends PipelineTestSupport {
         assertEquals(0, count("select count(*) from outbox where event_type = 'warning'"));
     }
 
-    private static AnalysisResponse warn(int score, String message) {
-        return new AnalysisResponse(score, AnalysisResponse.WARN, message, "근거", java.util.List.of(), null);
+    @Test
+    @DisplayName("점수가 안 올라도 직전 경고에 없던 수법이 잡히면 warning — 같은 수법만이면 안 낸다")
+    void newTacticIsAnnouncedEvenWithoutScoreRise() {
+        accept(CALL, 1, "메신저로 옮기시죠");
+        apply(lease(), warn(100, "링크 안내", finding("F3")));            // 첫 위험 → alert (이미 100)
+        accept(CALL, 2, "다시 말씀드리면");
+        apply(lease(), warn(100, "링크 안내", finding("F3")));            // 같은 수법 → 없음
+        accept(CALL, 3, "안전계좌로 보내세요");
+        apply(lease(), warn(100, "링크 안내", finding("F3"), finding("F1")));  // 점수 그대로, 새 수법 → warning
+        accept(CALL, 4, "지금요");
+        apply(lease(), warn(100, "링크 안내", finding("F3"), finding("F1")));  // 이미 알린 수법 → 없음
+
+        assertEquals(java.util.List.of("alert", "warning"),
+                db.queryForList("select event_type from outbox where call_id = ? and event_type <> 'utterance' order by event_seq",
+                        String.class, CALL));
+        var findings = json.readTree(db.queryForObject(
+                "select cast(payload as char) from outbox where event_type = 'warning'", String.class)).get("findings");
+        assertEquals(2, findings.size());
+        assertEquals("F1", findings.get(1).get("code").asString());
+        assertEquals("F1 근거", findings.get(1).get("reason").asString());
+        assertEquals(java.util.List.of(3L), json.convertValue(findings.get(1).get("evidenceSeqs"),
+                new tools.jackson.core.type.TypeReference<java.util.List<Long>>() {}));
+    }
+
+    private static AnalysisResponse warn(int score, String message, AnalysisResponse.Finding... findings) {
+        return new AnalysisResponse(score, AnalysisResponse.WARN, message, "근거", java.util.List.of(),
+                java.util.List.of(findings), null);
+    }
+
+    private static AnalysisResponse.Finding finding(String code) {
+        return new AnalysisResponse.Finding(code, code + " 이름", 40, code + " 근거", code + " 안내",
+                java.util.List.of("F1".equals(code) ? 3L : 1L));
     }
 }
